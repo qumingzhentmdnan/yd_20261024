@@ -1,0 +1,34 @@
+apiVersion: safeagent.io/v1
+kind: AgentManifest
+metadata:
+  id: probe
+  version: 1.0.0
+  displayName: Manifest 配置探针
+  support:
+    os: linux
+    architectures: [amd64]
+    modes: [pty]
+  provenance:
+    source: builtin
+    packageRef: probe-builtin-v1
+runtime:
+  executable: /opt/agents/probe/bin/probe
+  args: [--config, '${home}/.config/probe/settings.json']
+  cwd: '${workspace}'
+  terminal: pty
+  user: agent
+  environment:
+    HOME: '${home}'
+    PATH: /usr/bin:/bin
+    PROBE_CONFIG: '${home}/.config/probe/settings.json'
+    SAFEAGENT_PROXY_KEY: proxy-managed
+files:
+  - destination: '${home}/.config/probe/settings.json'
+    template: templates/settings.json
+    format: json
+  - destination: '${home}/.config/probe/settings.toml'
+    template: templates/settings.json
+    format: toml
+capabilities:
+  model:
+    protocol: test-http
