@@ -1,0 +1,125 @@
+[
+  {
+    "name": "request-empty-object",
+    "terminal": false,
+    "valid": true,
+    "kind": 1,
+    "stream": 0,
+    "bodyHex": "7b7d",
+    "hex": "534147500001010000000002000000007b7d"
+  },
+  {
+    "name": "response-result",
+    "terminal": false,
+    "valid": true,
+    "kind": 2,
+    "stream": 0,
+    "bodyHex": "7b22726571756573744944223a2231222c22726573756c74223a7b7d7d",
+    "hex": "53414750000102000000001d000000007b22726571756573744944223a2231222c22726573756c74223a7b7d7d"
+  },
+  {
+    "name": "terminal-ansi-bytes",
+    "terminal": true,
+    "valid": true,
+    "kind": 18,
+    "stream": 7,
+    "bodyHex": "1b5b33316d4f4b1b5b306d0d0a",
+    "hex": "53414750000112000000000d000000071b5b33316d4f4b1b5b306d0d0a"
+  },
+  {
+    "name": "terminal-fin",
+    "terminal": true,
+    "valid": true,
+    "kind": 19,
+    "stream": 7,
+    "bodyHex": "",
+    "hex": "53414750000113000000000000000007"
+  },
+  {
+    "name": "terminal-bound",
+    "terminal": true,
+    "valid": true,
+    "kind": 17,
+    "stream": 7,
+    "bodyHex": "7b2264726f707065644279746573223a2230227d",
+    "hex": "534147500001110000000014000000077b2264726f707065644279746573223a2230227d"
+  },
+  {
+    "name": "bad-magic",
+    "terminal": false,
+    "valid": false,
+    "hex": "004147500001010000000002000000007b7d"
+  },
+  {
+    "name": "bad-major",
+    "terminal": false,
+    "valid": false,
+    "hex": "534147500101010000000002000000007b7d"
+  },
+  {
+    "name": "bad-minor",
+    "terminal": false,
+    "valid": false,
+    "hex": "534147500002010000000002000000007b7d"
+  },
+  {
+    "name": "bad-flags",
+    "terminal": false,
+    "valid": false,
+    "hex": "534147500001010100000002000000007b7d"
+  },
+  {
+    "name": "unknown-kind",
+    "terminal": false,
+    "valid": false,
+    "hex": "534147500001ff0000000002000000007b7d"
+  },
+  {
+    "name": "oversize-control",
+    "terminal": false,
+    "valid": false,
+    "hex": "53414750000101000001000100000000"
+  },
+  {
+    "name": "oversize-terminal",
+    "terminal": true,
+    "valid": false,
+    "hex": "53414750000112000000400100000007"
+  },
+  {
+    "name": "terminal-zero-stream",
+    "terminal": true,
+    "valid": false,
+    "hex": "53414750000112000000000000000000"
+  },
+  {
+    "name": "control-nonzero-stream",
+    "terminal": false,
+    "valid": false,
+    "hex": "53414750000101000000000000000007"
+  },
+  {
+    "name": "terminal-kind-on-control",
+    "terminal": false,
+    "valid": false,
+    "hex": "53414750000112000000000000000000"
+  },
+  {
+    "name": "nonempty-fin",
+    "terminal": true,
+    "valid": false,
+    "hex": "53414750000113000000000100000007"
+  },
+  {
+    "name": "half-header",
+    "terminal": false,
+    "valid": false,
+    "hex": "5341475000010100"
+  },
+  {
+    "name": "half-payload",
+    "terminal": false,
+    "valid": false,
+    "hex": "534147500001010000000002000000007b"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "method": "PrepareAgent",
+    "params": {
+      "manifestRef": "agent-v1",
+      "manifestDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "configDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "workspaceRef": "workspace-1",
+      "workspaceDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "operationID": "22222222-2222-4222-8222-222222222222"
+    },
+    "canonical": "[\"PrepareAgent\",\"agent-v1\",\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"workspace-1\",\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"]",
+    "sha256": "8334e25a733642518c83138eaf38e76c68b6318ad5268cd5b8ca29e2469626fc"
+  },
+  {
+    "method": "StartSession",
+    "params": {
+      "sessionID": "session-1",
+      "preparedID": "prep-1",
+      "workspaceRef": "workspace-1",
+      "workspaceDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "operationID": "33333333-3333-4333-8333-333333333333",
+      "rows": 24,
+      "cols": 80
+    },
+    "canonical": "[\"StartSession\",\"session-1\",\"prep-1\",\"workspace-1\",\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",24,80]",
+    "sha256": "99c976577a339c23bdb290cd4d459ed64e756554b2a2b680ce2ad8a7056d411b"
+  }
+]

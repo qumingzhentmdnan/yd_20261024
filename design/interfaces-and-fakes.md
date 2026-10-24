@@ -1,6 +1,6 @@
 # 并发开发的前置接口与 Fake 设计
 
-状态：待实现的接口提案。本文补充 design.md；其中 Go 签名表达边界，尚不是已编译的接口。本文未实现生产组件或 fake。当前只确定协议设计原则，尚未冻结可供 Host、Guest、Fake 分别实现的线协议；须通过第 7 节的决策与实测门槛。
+状态：管理面仍是接口提案；Guest 共享基础已实现，交付范围见 `../docs/guest-foundation.md`，真实 RPC/Runner 待实现。VM 生命周期已实现，实际契约以 `internal/host/vm` 和 `internal/testkit/vmcontract` 为准；本文不再维护第二套 VM 签名。Guest 的候选字段、方法、Host 消费方接口见 `guest-protocol-v0.1.md` 第 8 节及其 Schema，原型证据与待补差距分别列明；须通过第 7 节门槛才可冻结。
 
 ## 1. 目标与依赖方向
 
@@ -16,7 +16,7 @@ Guest Bridge → 设备数据流 → Host Gateway → 固定上游
                                    └→ CredentialStore
 ```
 
-Manager 不代理每个模型数据包，也不把 Vault 交给 GuestClient。模型/MCP 数据流与控制、PTY、文件流在解析和调度上分开；是否分为独立物理设备尚待 spike 决定，不能据此各自选择拓扑。共享业务值类型放 internal/domain；线协议放 internal/protocol；Manifest schema/校验放 internal/manifest。domain 不依赖各实现包。消费方定义小接口，避免把所有接口堆进 protocol。
+Manager 不代理每个模型数据包，也不把 Vault 交给 GuestClient。模型/MCP 数据流与控制、PTY、文件流在解析和调度上分开；当前候选选择独立 control/terminal 端口，proxy 仅有设备实验，业务 framing 待单独定义。共享业务值类型放 internal/domain；线协议放 internal/protocol；Manifest schema/校验放 internal/manifest。domain 不依赖各实现包。消费方定义小接口，避免把所有接口堆进 protocol。
 
 ## 2. 第一批必须固定的值类型
 
@@ -26,13 +26,13 @@ Manager 不代理每个模型数据包，也不把 Vault 交给 GuestClient。�
 | SourceRef | Host 授权目录注册后的不透明引用，不能用它拼接宿主路径 |
 | ManifestRef / ImageRef | 版本和摘要绑定；解析后才进入启动流程 |
 | SandboxState | 使用主设计的状态机；每次变更有单调递增 revision |
-| SessionExit | 明确 exitCode、signal、reason；进程退出与通信失败不同 |
+| SessionExit | 明确 code、signal、reason，沿用 Guest 候选定义；进程退出与通信失败不同 |
 | BaselineID | 导入文件内容、路径、类型和权限的不可变基线 |
 | ChangeSetID / Digest | Host 验证并固定后的导出快照；不能直接相信 Guest 的哈希 |
 | ApprovalID | Host 保存的单次批准记录，绑定 sandbox、source、baseline、changeSet digest 和有效期 |
 | Error | 稳定 code、可展示 message、requestID、recoverable；内部 cause 不直接返回 UI |
 
-建议首批错误码：INVALID_SPEC、INVALID_STATE、NOT_FOUND、CONFLICT、UNAUTHORIZED、POLICY_DENIED、PROTOCOL_MISMATCH、GUEST_DISCONNECTED、TIMEOUT、RESOURCE_LIMIT、CLEANUP_FAILED。
+管理面建议首批错误码：INVALID_SPEC、INVALID_STATE、NOT_FOUND、CONFLICT、UNAUTHORIZED、POLICY_DENIED、PROTOCOL_MISMATCH、GUEST_DISCONNECTED、TIMEOUT、RESOURCE_LIMIT、CLEANUP_FAILED。它们不直接作为 Guest wire 错误码；wire 集合以 Guest 协议为准。
 
 所有外部操作接受 context。requestID 用于追踪，operationID 用于去重，二者不能混用。同一 operationID 配不同参数返回 CONFLICT。去重结果由 Host 持久化；Guest 内操作去重至少覆盖同一次 VM 启动。
 
@@ -41,42 +41,25 @@ Manager 不代理每个模型数据包，也不把 Vault 交给 GuestClient。�
 以下签名中的结构体需在编码前补齐字段与 JSON golden fixture；不直接将 Go 内部结构体暴露为 HTTP DTO。
 
 ```go
-// manager 包定义；VMConfig 由 Host 从已验证的 Spec 生成。
-type VMBackend interface {
-    Create(context.Context, VMConfig) (VMRef, error)
-    Boot(context.Context, VMRef) (VMConnection, error)
-    Inspect(context.Context, VMRef) (VMStatus, error)
-    Stop(context.Context, VMRef) error
-    Destroy(context.Context, VMRef) error
-}
+// VMBackend 复用实际 VM 生命周期契约，不在本提案中另起接口。
+type VMBackend = vm.VMBackend
 
-type GuestClient interface {
-    Hello(context.Context, HelloRequest) (HelloResponse, error)
-    Prepare(context.Context, PrepareRequest) (PrepareResult, error)
-    Start(context.Context, StartRequest) (SessionInfo, error)
-    AttachTerminal(context.Context, SessionID) (Terminal, error)
-    StopSession(context.Context, StopRequest) error
-    WaitSession(context.Context, SessionID) (SessionExit, error)
-    GetState(context.Context) (GuestState, error)
-}
-
-type Terminal interface {
-    io.ReadWriteCloser
-    Resize(context.Context, uint16, uint16) error
-}
+// GuestClient 与 Terminal 复用 internal/host/guest 的 Client、Terminal 定义。
 
 type GatewayBindings interface {
+    // Bind 为 Host 已确认的通道身份创建受限绑定。
     Bind(context.Context, ChannelIdentity, BindingSpec) (BindingID, error)
+    // Revoke 撤销绑定并取消相关在途调用。
     Revoke(context.Context, BindingID) error
 }
 ```
 
-- VMConnection 是控制与数据通道的装配占位，不代表已决定物理通道数量；连接关闭必须唤醒全部等待者。字段与 Done/Wait 归属由通道 spike 确认，VM 进程退出与通道断开必须区分。
+- 通道装配层为 GuestClient 提供独立 control/terminal 私有句柄，绑定现有 VMInstance；不能假定 VMBackend.Start 返回业务连接。句柄交付与重连机制仍待生产验证，VM 进程退出与通道断开必须区分。
 - ChannelIdentity 由 Host 接受器根据已知 VMRef 和本次启动 epoch 创建，不从 Guest 消息反序列化；epoch 改变后旧绑定失效。
-- Create 使用 VMConfig 中稳定的 VM 标识去重：同标识、同配置重复调用返回已有资源，同标识、不同配置返回 CONFLICT；不通过方法名前缀表达幂等性。Boot 已运行时返回现有启动结果，不重复创建进程或第二套消费者。
-- Stop/Destroy/Revoke 重复调用成功；并发重复调用须串行化，清理失败保留可重试资源记录。
-- Prepare 对应线协议 PrepareAgent，只接收内置 Manifest 引用、摘要和限域配置；不接收任意命令、Host 路径或真实凭据。相同 operationID 和参数重复调用返回相同 preparedID，参数不同返回 CONFLICT；运行中不能替换准备结果。
-- Start 对应线协议 StartSession。StartRequest 含 Host 分配的 sessionID、operationID，以及 preparedID、workspaceRef、workspaceDigest。PrepareResult 绑定 Manifest、配置与工作区摘要；Guest 核对导入完成记录和准备结果后才能启动。摘要用于一致性核对，不是对恶意 Guest 的远程证明。MVP 每个 VM 同时仅一个 Agent session，第二次启动不能意外重复执行。
+- Create 使用 VMConfig 中稳定的 VM 标识去重：同标识、同配置重复调用返回已有资源，同标识、不同配置返回 CONFLICT；不通过方法名前缀表达幂等性。VMBackend.Start 已运行时返回同一 VMInstance，不重复创建 VMM；StartSession 是另一层的工作负载操作。
+- VM Stop 的重复、旧 epoch 与 Destroy 的状态限制沿用实际契约，不能笼统当作任何调用都成功；Guest StopSession 和 Revoke 的重复调用按各自状态契约处理，清理失败保留可重试记录。
+- PrepareAgent 只接收内置 Manifest 引用、摘要和已登记的限域配置摘要；不接收任意命令、Host 路径或真实凭据。相同 operationID 和参数重复调用返回相同 preparedID，参数不同返回 CONFLICT；运行中不能替换准备结果。
+- StartSessionParams 含 Host 分配的 sessionID、operationID，以及 preparedID、workspaceRef、workspaceDigest 和初始窗口。Preparation 绑定 Manifest、配置与工作区摘要；Guest 核对导入完成记录和准备结果后才能启动。摘要用于一致性核对，不是对恶意 Guest 的远程证明。MVP 每个 VM 同时仅一个工作负载进程组，第二次启动不能意外重复执行。
 - AttachTerminal 通过控制 RPC 建立 terminal stream，后续输入输出仅走该流，不再设置逐次 WriteTTY/WriteTerminal RPC。Resize 对应控制 RPC ResizeTerminal。首版仅允许一个写入者；慢读有界背压，断线重连不重启进程，也不承诺历史输出重放。输出不按行处理，保留原始 ANSI/UTF-8 字节。
 - WaitSession 可重复查询退出结果；RPC 断开返回连接错误，不能伪装成 exitCode=0。终端 EOF 不替代退出事件。
 
@@ -137,6 +120,8 @@ Body 不使用无限制 []byte。必须定义请求大小、并发数、空闲�
 
 ## 7. 最小线协议决策与冻结门槛
 
+当前候选及精确 Schema 见 `guest-protocol-v0.1.md`，设备补充实测见 `../docs/guest-channel-spike-2026-10-24.md`，固定工作负载 RPC 实测见 `../docs/guest-rpc-spike-2026-10-24.md`。生产字段和未验证差距见协议第 9 节；不能把已有原型通过视为以下全部验收已经完成。
+
 第一阶段只冻结 v0.1 控制协议与终端流。文件与 Gateway 流可以复用后续确定的 framing，但业务字段另行评审；不得临时把文件或模型 body 塞进控制 JSON。v0.1 是开发前的最小候选协议，真实设备测试通过前不能标记为已验证或稳定 v1。
 
 ### 7.1 必须先作出的决策
@@ -151,11 +136,11 @@ Body 不使用无限制 []byte。必须定义请求大小、并发数、空闲�
 | 握手和身份 | 固定握手状态图，定义 Host 端点→VMRef+epoch+连接的映射；旧端点关闭，新连接不得复活旧授权，收到旧 epoch 或未 Hello 的业务消息必须拒绝 |
 | 去重和重试 | 明确 operationID 缓存作用域、参数规范化摘要、容量、保存时限和状态查询；Start 超时不代表未执行，不能换新 operationID 盲目重试 |
 
-单帧 64 KiB、每 VM 最多 16 个活动数据流仅为初始提议；最终数值、控制头开销、并发上限和信用窗口需写入候选规范与共同 fixture。不能让 Host、Guest、Fake 各自解释这些默认值。
+历史上“每 VM 最多 16 个活动数据流”的提议已被当前候选替代：一个工作负载进程组、一个 terminal attachment；16 是控制在途请求上限，不是终端流数。控制 payload 64 KiB、terminal payload 16 KiB，均另加固定 16 字节帧头；候选不用信用窗口。全部上限以协议和 Schema 为准，不由各实现自行解释。
 
 ### 7.2 v0.1 消息范围
 
-候选控制方法统一为 Hello、GetState、PrepareAgent、StartSession、AttachTerminal、ResizeTerminal、StopSession；退出通知为 SessionExited。StartSession 返回 SessionInfo，AttachTerminal 单独返回终端流描述；不并存 WriteTTY/WriteTerminal。WaitSession 是客户端等待/查询退出结果的抽象，其事件订阅与 GetState 恢复方案须在 envelope 冻结时写清，避免把长时间等待占满控制处理队列。
+候选控制方法统一为 Hello、GetState、PrepareAgent、StartSession、AttachTerminal、ResizeTerminal、DetachTerminal、StopSession；退出通知为 SessionExited。StartSession 返回 SessionInfo，AttachTerminal 单独返回终端流描述；不并存 WriteTTY/WriteTerminal。WaitSession 是客户端等待/查询退出结果的抽象，其订阅与 GetState 合并方案见协议第 8.4 节，不能把长时间等待占满控制处理队列。
 
 最小成功链路：QEMU 启动 → Hello → GetState → PrepareAgent → StartSession → AttachTerminal → PTY echo/Resize → StopSession → SessionExited。测试 CLI 使用预装受信测试 Manifest，不引入任意命令 RPC。
 
@@ -214,7 +199,7 @@ Fake 测试不能证明 QEMU 网络隔离、真实非 root 权限、Host 文件�
 
 1. 集成负责人：初始化 go.mod、共同类型、消费方接口、错误码、消息 fixture、契约 suite；统一维护 go.mod/go.sum。
 2. VM Agent：实现 VMBackend、真实通道 spike 和对应 fake；随后实现 Host/Guest 文件传输及工作区。
-3. Guest Agent：实现 GuestClient fake、真实 RPC handler/client、Manifest/Runner/Bridge；使用假上游联调。
+3. Guest Agent：复用已落地的 internal/protocol、internal/host/guest、fakeguest 与 guestcontract；实现真实 RPC handler/client、Manifest/Runner/Bridge，使用假上游联调。
 4. Gateway Agent：实现绑定 fake、Vault fake、模型/MCP 假上游和真实 Gateway。
 5. 集成负责人：实现 Manager，先用全部 fake 跑启动/停止/导出流程，再逐个替换真实组件，最后接 UI。
 
