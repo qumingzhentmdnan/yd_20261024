@@ -8,7 +8,8 @@
 /bin/
 /dist/
 /var/
-/artifacts/
+/artifacts/*
+!/artifacts/go.mod
 *.qcow2
 *.raw
 *.img
