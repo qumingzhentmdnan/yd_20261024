@@ -1,4 +1,4 @@
-package workspace
+package workspacebundle
 
 import (
 	"fmt"
@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 )
 
-// validateSelection 校验外部文件路径并返回独立的已排序清单。
-func validateSelection(paths []string, limits Limits) ([]string, error) {
+// ValidateSelection 校验外部文件路径并返回独立的已排序清单。
+func ValidateSelection(paths []string, limits Limits) ([]string, error) {
 	if len(paths) > limits.MaxFiles {
 		return nil, ErrLimitExceeded
 	}

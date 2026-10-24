@@ -21,6 +21,8 @@ type channelRun struct {
 	dir string
 	// closed 在 VMM 退出后阻止交付。
 	closed bool
+	// workspaceOpened 禁止同boot工作区重复交付。
+	workspaceOpened bool
 	// proxyOpened 禁止同boot代理重连。
 	proxyOpened bool
 	// controlOpened 禁止未验证的同 boot 控制重连。
@@ -161,4 +163,16 @@ func (c *Channels) OpenProxy(ctx context.Context) (net.Conn, error) {
 	c.run.proxyOpened = true
 	c.run.mu.Unlock()
 	return c.run.open(ctx, "proxy.sock")
+}
+
+// OpenWorkspace 只交付同一可信实例的唯一工作区通道，失败后要求新epoch。
+func (c *Channels) OpenWorkspace(ctx context.Context) (net.Conn, error) {
+	c.run.mu.Lock()
+	if c.run.workspaceOpened {
+		c.run.mu.Unlock()
+		return nil, fmt.Errorf("workspace reconnect requires a new VM epoch")
+	}
+	c.run.workspaceOpened = true
+	c.run.mu.Unlock()
+	return c.run.open(ctx, "workspace.sock")
 }

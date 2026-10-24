@@ -6,33 +6,23 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"safeagent/internal/workspacebundle"
 )
 
 var (
-	ErrInvalidSelection    = errors.New("工作区选择无效")
-	ErrLimitExceeded       = errors.New("工作区超过限额")
+	ErrInvalidSelection    = workspacebundle.ErrInvalidSelection
+	ErrLimitExceeded       = workspacebundle.ErrLimitExceeded
 	ErrSourceChanged       = errors.New("复制期间源文件发生变化")
 	ErrNotFound            = errors.New("基线不存在")
-	ErrCorruptBaseline     = errors.New("基线内容损坏")
+	ErrCorruptBaseline     = workspacebundle.ErrCorruptBaseline
 	ErrUnsupportedPlatform = errors.New("当前平台不支持工作区安全复制")
 )
 
 // BaselineID 标识已发布的工作区基线，不是路径。
 type BaselineID string
 
-// Limits 限定一次快照及归档的资源使用。
-type Limits struct {
-	// MaxFiles 限制选择文件的数量，必须为正。
-	MaxFiles int
-	// MaxFileBytes 限制单文件字节数，必须为正。
-	MaxFileBytes int64
-	// MaxTotalBytes 限制所有文件内容的总字节数，必须为正。
-	MaxTotalBytes int64
-	// MaxPathBytes 限制相对路径的 UTF-8 字节数，必须为正。
-	MaxPathBytes int
-	// MaxArchiveBytes 限制完整归档字节数，必须为正。
-	MaxArchiveBytes int64
-}
+// Limits 复用Host与Guest统一的资源限额。
+type Limits = workspacebundle.Limits
 
 // ImportSelection 记录调用方已确认的精确文件选择。
 type ImportSelection struct {
@@ -58,25 +48,11 @@ type Baseline struct {
 	ArchiveBytes int64 `json:"archiveBytes"`
 }
 
-// Entry 记录一个文件的规范元数据。
-type Entry struct {
-	// Path 使用斜杠分隔的相对文件路径。
-	Path string `json:"path"`
-	// Size 记录文件内容字节数。
-	Size int64 `json:"size"`
-	// Executable 表示是否保留可执行权限。
-	Executable bool `json:"executable"`
-	// Digest 记录文件内容的 SHA-256 摘要。
-	Digest string `json:"digest"`
-}
+// Entry 复用规范包文件元数据。
+type Entry = workspacebundle.Entry
 
-// Manifest 记录导入包的规范文件清单。
-type Manifest struct {
-	// Version 当前固定为 1。
-	Version int `json:"version"`
-	// Entries 按路径原始字节排序，空清单编码为数组。
-	Entries []Entry `json:"entries"`
-}
+// Manifest 复用规范包清单。
+type Manifest = workspacebundle.Manifest
 
 // safeError 去除文件系统错误携带的绝对路径并保留底层原因。
 func safeError(op, relative string, err error) error {

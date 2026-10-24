@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"safeagent/internal/workspacebundle"
 	"strconv"
 	"strings"
 )
@@ -69,7 +70,7 @@ func newID(prefix string) string {
 
 // Stage 将已确认的文件选择复制为不可变基线后原子发布。
 func (s *Store) Stage(ctx context.Context, selection ImportSelection) (baseline Baseline, err error) {
-	paths, err := validateSelection(selection.Paths, s.limits)
+	paths, err := workspacebundle.ValidateSelection(selection.Paths, s.limits)
 	if err != nil {
 		return baseline, err
 	}
@@ -202,7 +203,7 @@ func (s *Store) writeBundle(ctx context.Context, temp string, m Manifest, manife
 	defer f.Close()
 	capped := &cappedWriter{writer: f, remaining: s.limits.MaxArchiveBytes}
 	w := tar.NewWriter(capped)
-	if err := w.WriteHeader(bundleHeader("manifest.json", int64(len(manifest)), false)); err != nil {
+	if err := w.WriteHeader(workspacebundle.Header("manifest.json", int64(len(manifest)), false)); err != nil {
 		return 0, safeError("写入包清单头", "", err)
 	}
 	if _, err := w.Write(manifest); err != nil {
@@ -212,7 +213,7 @@ func (s *Store) writeBundle(ctx context.Context, temp string, m Manifest, manife
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		if err := w.WriteHeader(bundleHeader("files/"+entry.Path, entry.Size, entry.Executable)); err != nil {
+		if err := w.WriteHeader(workspacebundle.Header("files/"+entry.Path, entry.Size, entry.Executable)); err != nil {
 			return 0, safeError("写入文件头", entry.Path, err)
 		}
 		input, err := os.Open(filepath.Join(temp, strconv.Itoa(i)))
@@ -338,7 +339,7 @@ func (s *Store) Lookup(ctx context.Context, id BaselineID) (Baseline, error) {
 	if string(canonical) != string(data) {
 		return zero, ErrCorruptBaseline
 	}
-	if err := validateManifest(m, s.limits); err != nil {
+	if err := workspacebundle.ValidateManifest(m, s.limits); err != nil {
 		return zero, errors.Join(ErrCorruptBaseline, err)
 	}
 	var total int64
@@ -375,34 +376,48 @@ func (r *importReader) Close() error {
 
 // OpenImport 校验已发布包后返回从头读取的独立句柄。
 func (s *Store) OpenImport(ctx context.Context, id BaselineID) (io.ReadCloser, error) {
+	_, _, reader, err := s.OpenImportForGuest(ctx, id, s.limits)
+	return reader, err
+}
+
+// OpenImportForGuest 在发送前以存储与Guest限额的交集校验一次完整归档。
+func (s *Store) OpenImportForGuest(ctx context.Context, id BaselineID, guest Limits) (Baseline, Manifest, io.ReadCloser, error) {
+	limits := workspacebundle.Intersect(s.limits, guest)
+	if limits.MaxFiles <= 0 || limits.MaxFileBytes <= 0 || limits.MaxTotalBytes <= 0 || limits.MaxPathBytes <= 0 || limits.MaxArchiveBytes <= 0 {
+		return Baseline{}, Manifest{}, nil, ErrInvalidSelection
+	}
 	baseline, err := s.Lookup(ctx, id)
 	if err != nil {
-		return nil, err
+		return Baseline{}, Manifest{}, nil, err
 	}
 	f, err := os.Open(filepath.Join(s.dataDir, "baselines", string(id), "bundle.tar"))
 	if err != nil {
-		return nil, safeError("打开导入包", "", err)
+		return Baseline{}, Manifest{}, nil, safeError("打开导入包", "", err)
 	}
-	m, err := ValidateBundle(ctx, f, s.limits)
+	if baseline.ArchiveBytes > limits.MaxArchiveBytes || baseline.FileCount > limits.MaxFiles || baseline.TotalBytes > limits.MaxTotalBytes {
+		f.Close()
+		return Baseline{}, Manifest{}, nil, ErrLimitExceeded
+	}
+	m, err := ValidateBundle(ctx, f, limits)
 	if err != nil {
 		f.Close()
-		return nil, classifyBundleError(err)
+		return Baseline{}, Manifest{}, nil, classifyBundleError(err)
 	}
 	data, _ := json.Marshal(m)
 	info, err := f.Stat()
 	if err != nil {
 		f.Close()
-		return nil, safeError("检查导入包", "", err)
+		return Baseline{}, Manifest{}, nil, safeError("检查导入包", "", err)
 	}
 	if digestBytes(data) != baseline.Digest || info.Size() != baseline.ArchiveBytes {
 		f.Close()
-		return nil, ErrCorruptBaseline
+		return Baseline{}, Manifest{}, nil, ErrCorruptBaseline
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		f.Close()
-		return nil, safeError("定位导入包", "", err)
+		return Baseline{}, Manifest{}, nil, safeError("定位导入包", "", err)
 	}
-	return &importReader{ctx: ctx, file: f}, nil
+	return baseline, m, &importReader{ctx: ctx, file: f}, nil
 }
 
 // classifyBundleError 区分格式及截断错误与实际存储读取故障。

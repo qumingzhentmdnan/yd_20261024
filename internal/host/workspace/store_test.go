@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"safeagent/internal/workspacebundle"
 	"strings"
 	"sync"
 	"testing"
@@ -135,7 +136,7 @@ func TestEmptyAndGolden(t *testing.T) {
 // TestSelectionBoundaries 验证不可信文件路径及精确容量边界。
 func TestSelectionBoundaries(t *testing.T) {
 	for _, paths := range [][]string{{"../x"}, {"/x"}, {"a//b"}, {"a\\b"}, {".git/config"}, {"a", "A"}, {"a", "a/b"}, {"A", "a/b"}, {"NUL"}, {"a."}, {"a/../b"}, {"a\x00b"}} {
-		if _, err := validateSelection(paths, testLimits()); !errors.Is(err, ErrInvalidSelection) {
+		if _, err := workspacebundle.ValidateSelection(paths, testLimits()); !errors.Is(err, ErrInvalidSelection) {
 			t.Fatalf("未拒绝路径 %q: %v", paths, err)
 		}
 	}

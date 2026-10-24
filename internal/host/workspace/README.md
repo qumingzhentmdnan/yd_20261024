@@ -12,7 +12,7 @@
 
 每次 `OpenImport` 先完整校验，再返回定位到开头的独立句柄；调用方负责 Close。取消后后续读取停止，已经执行的单次本地文件读取不承诺异步中断。
 
-Guest 传输、解包与成功登记尚未接入。只有将来 Guest Import 完成后才能把 ID/Digest 用于真实 Prepare；测试中的固定工作区记录不能替代导入。
+Guest 传输、单遍校验提取与成功登记已接入，见[导入实现](../../../docs/guest-workspace-import-implementation.md)。使用 OpenImportForGuest 在发送前应用 Guest 固定限额；只有真实 Import 成功后才能把 ID/Digest 用于 Prepare。默认固定测试镜像记录仍不代表用户项目导入成功。
 
 验证命令：
 

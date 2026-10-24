@@ -130,6 +130,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// 镜像显式启用导入，根句柄由入口持有到所有导入任务退出。
+	if _, statErr := os.Stat("/etc/safeagent/workspace-enabled"); statErr == nil {
+		fd, openErr := unix.Open("/workspace", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if openErr != nil {
+			return openErr
+		}
+		config.WorkspaceRoot = os.NewFile(uintptr(fd), "/workspace")
+		defer config.WorkspaceRoot.Close()
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
 	boot, err := server.New(config)
 	if err != nil {
 		return err
@@ -148,10 +159,46 @@ func run() error {
 	var tasks sync.WaitGroup
 	proxyContext, stopProxy := context.WithCancel(ctx)
 	defer func() { stopProxy(); tasks.Wait() }()
+	var workspaceReady chan struct{}
+	if config.WorkspaceRoot != nil {
+		workspaceReady = make(chan struct{})
+		tasks.Add(1)
+		go func() {
+			defer tasks.Done()
+			listener := device.Listen("/dev/safeagent.workspace")
+			defer listener.Close()
+			ended := make(chan struct{})
+			stop := context.AfterFunc(proxyContext, func() { defer close(ended); listener.Close() })
+			defer func() {
+				if !stop() {
+					<-ended
+				}
+			}()
+			port, openErr := listener.Accept()
+			if openErr != nil {
+				control.Close()
+				return
+			}
+			if importErr := boot.ServeWorkspace(proxyContext, port); importErr != nil {
+				log.Print("Workspace import ended: ", importErr)
+				control.Close()
+				return
+			}
+			close(workspaceReady)
+		}()
+	}
 	if _, statErr := os.Stat("/etc/safeagent/proxy-enabled"); statErr == nil {
 		tasks.Add(1)
 		go func() {
 			defer tasks.Done()
+			// 导入镜像必须先完成真实发布及回执，再接纳proxy Ready和开放HTTP。
+			if workspaceReady != nil {
+				select {
+				case <-workspaceReady:
+				case <-proxyContext.Done():
+					return
+				}
+			}
 			listener := device.Listen("/dev/safeagent.proxy")
 			defer listener.Close()
 			done := make(chan struct{})

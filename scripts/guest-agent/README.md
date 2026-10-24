@@ -24,3 +24,5 @@ CGO_ENABLED=1 go test -race ./internal/host/guest/rpc \
 宿主内存控制通道/Unix 终端 + 真实 PTY 的共享 `guestcontract`、Host wire 故障、容量和慢输出测试随普通 `go test ./...` 运行。Fake、宿主真实 PTY、真实 TCG、跨平台结果需分别记录，不相互替代。
 
 独立 proxy/HTTP Bridge 验证构建时增加 `--proxy`；Guest保持无网卡，仅启用lo。构建固定HTTP测试程序并登记proxy开关，旧PTY镜像无需此开关。新链路复现命令与结果见 `docs/guest-proxy-implementation.md`。固定 `http`、`http-cancel`、`http-upload`、`http-slow` 命令只访问127.0.0.1:18080，不接受任意目标或Host认证。
+
+使用 `--workspace` 构建真实导入测试镜像，支持与 `--proxy` 组合；不启用时保留固定工作区测试模式。cpio统一使用root所有权，Guest初始化授权HOME、导入时授权项目。真实导入运行方式见[实现记录](../../docs/guest-workspace-import-implementation.md)。

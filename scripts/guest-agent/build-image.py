@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--race', action='store_true')
     parser.add_argument('--proxy', action='store_true')
+    parser.add_argument('--workspace', action='store_true')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     root = args.output.resolve() / 'rootfs'
@@ -45,6 +46,8 @@ while :; do sleep 1; done
         subprocess.run(proxy_command, cwd=repo, env=environment, check=True)
         # 工作负载仍只接受固定命令，不开放任意HTTP目标或脚本执行。
         workload = workload.replace(b'  size)', b'  http) /bin/fixed-http ;;\n  http-cancel) /bin/fixed-http cancel ;;\n  http-upload) /bin/fixed-http upload ;;\n  http-slow) /bin/fixed-http slow ;;\n  http-abort) /bin/fixed-http abort ;;\n  http-total) /bin/fixed-http total ;;\n  size)')
+    if args.workspace:
+        workload = workload.replace(b'  size)', b'  workspace) pwd; id -u; cat imported.txt; sha256sum binary.bin; test -x run.sh && ./run.sh ;;\n  size)')
     config = b'fixed-nonroot-pty-v01\n'
     workspace = b'fixed-workspace-v01\n'
     fixed = root / 'etc/safeagent'
@@ -55,6 +58,10 @@ while :; do sleep 1; done
         (fixed / name).write_bytes(value)
     content = dict(preparedID='registered', manifestRef='fixed-v01', manifestDigest=digest(workload), configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
     registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable='/bin/fixed-workload', directory='/home/agent', content=content)
+    if args.workspace:
+        (fixed / 'workspace-enabled').write_text('import-v01\n')
+        (root / 'workspace').mkdir(exist_ok=True)
+        (root / 'workspace').chmod(0o755)
     if args.proxy:
         (fixed / 'proxy-enabled').write_text('model\n')
     (fixed / 'registration.json').write_text(json.dumps(registration))
@@ -87,7 +94,7 @@ while :; do sleep 60; done
         (root / 'init').write_text(init.replace('/bin/guest-agent\n', observer + '/bin/guest-agent\n'))
     (root / 'init').chmod(0o755)
     with (args.output / 'initramfs.cpio.gz').open('wb') as target:
-        subprocess.run(['bash', '-o', 'pipefail', '-c', 'find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -1'], cwd=root, stdout=target, check=True)
+        subprocess.run(['bash', '-o', 'pipefail', '-c', 'find . -print0 | cpio --null -o --format=newc --owner=0:0 2>/dev/null | gzip -1'], cwd=root, stdout=target, check=True)
     (args.output / 'build.json').write_text(json.dumps(dict(race=args.race, command=command, initramfsDigest=digest((args.output / 'initramfs.cpio.gz').read_bytes())), indent=2) + '\n')
 
 

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"safeagent/internal/workspacewire"
 	"sort"
 	"sync"
 	"time"
@@ -16,6 +18,8 @@ import (
 
 // Config 由可信镜像登记层加载，不由业务请求构造。
 type Config struct {
+	// WorkspaceRoot 是可信入口持有的/workspace根句柄；nil为既有固定测试模式。
+	WorkspaceRoot *os.File
 	// Content 是启动前校验真实内容摘要后的固定登记记录。
 	Content protocol.Preparation
 	// Build 是守护进程构建标识。
@@ -66,6 +70,10 @@ type session struct {
 
 // Boot 在连接断开后继续拥有操作记录及工作负载。
 type Boot struct {
+	// importState 由mu保护，限制本boot一次导入。
+	importState importState
+	// imported 保存导入成功时的基线，不代表运行后内容不可变。
+	imported workspacewire.Imported
 	// config 是不可变固定登记内容。
 	config Config
 	// mu 是操作预留、资源提交和状态快照的串行边界。
@@ -225,6 +233,12 @@ func (b *Boot) executeOperation(ctx context.Context, input any) (any, error) {
 	}
 	prepared := b.config.Content
 	prepared.PreparedID = protocol.OpaqueID(id)
+	if b.config.WorkspaceRoot != nil {
+		b.mu.Lock()
+		prepared.WorkspaceRef = b.imported.WorkspaceRef
+		prepared.WorkspaceDigest = b.imported.WorkspaceDigest
+		b.mu.Unlock()
+	}
 	return prepared, nil
 }
 
@@ -238,7 +252,11 @@ func (b *Boot) start(ctx context.Context, p protocol.StartSessionParams) (protoc
 			return protocol.SessionInfo{}, err
 		}
 	}
-	process, err := runner.Start(b.config.Runner, p.SessionID, p.Rows, p.Cols)
+	config := b.config.Runner
+	if b.config.WorkspaceRoot != nil {
+		config.Dir = "/workspace/project"
+	}
+	process, err := runner.Start(config, p.SessionID, p.Rows, p.Cols)
 	if err != nil {
 		return protocol.SessionInfo{}, err
 	}
@@ -264,7 +282,7 @@ func (b *Boot) start(ctx context.Context, p protocol.StartSessionParams) (protoc
 
 // checkNewLocked 检查引用、生命周期及容量后才能预留，调用方持有 boot.mu。
 func (b *Boot) checkNewLocked(input any) error {
-	if b.reserved {
+	if b.reserved || (b.config.WorkspaceRoot != nil && b.importState != importCommitted) {
 		return protocol.Failure(protocol.CodeFailedPrecondition)
 	}
 	if len(b.operations) >= protocol.MaxOperations {
@@ -278,6 +296,10 @@ func (b *Boot) checkNewLocked(input any) error {
 	switch p := input.(type) {
 	case protocol.PrepareAgentParams:
 		expected := b.config.Content
+		if b.config.WorkspaceRoot != nil {
+			expected.WorkspaceRef = b.imported.WorkspaceRef
+			expected.WorkspaceDigest = b.imported.WorkspaceDigest
+		}
 		if p.ManifestRef != expected.ManifestRef || p.ManifestDigest != expected.ManifestDigest || p.ConfigDigest != expected.ConfigDigest || p.WorkspaceRef != expected.WorkspaceRef || p.WorkspaceDigest != expected.WorkspaceDigest {
 			return protocol.Failure(protocol.CodeFailedPrecondition)
 		}
