@@ -235,9 +235,14 @@ func accelerator(a vm.Accelerator) error {
 
 // args 构造固定的 QEMU 参数。
 func args(c vm.VMConfig, dir, epoch string) []string {
-	a := []string{"-machine", string(c.Machine), "-accel", string(c.Accelerator), "-cpu", "max", "-m", strconv.Itoa(int(c.MemoryMiB)), "-smp", strconv.Itoa(int(c.VCPUs)), "-nodefaults", "-no-user-config", "-display", "none", "-no-reboot", "-nic", "none", "-serial", "none", "-drive", "file=" + strings.ReplaceAll(filepath.Join(dir, "overlay.qcow2"), ",", ",,") + ",if=none,format=qcow2,id=workspace", "-device", "virtio-blk-device,drive=workspace", "-name", epoch, "-kernel", c.Image.KernelPath}
+	// TCG关闭精简ACPI硬件描述，让内核使用传统PIT中断完成早期时钟校准。
+	machine := string(c.Machine)
+	if c.Accelerator == vm.TCG {
+		machine += ",acpi=off"
+	}
+	a := []string{"-machine", machine, "-accel", string(c.Accelerator), "-cpu", "max", "-m", strconv.Itoa(int(c.MemoryMiB)), "-smp", strconv.Itoa(int(c.VCPUs)), "-nodefaults", "-no-user-config", "-display", "none", "-no-reboot", "-nic", "none", "-serial", "none", "-drive", "file=" + strings.ReplaceAll(filepath.Join(dir, "overlay.qcow2"), ",", ",,") + ",if=none,format=qcow2,id=workspace", "-device", "virtio-blk-device,drive=workspace", "-name", epoch, "-kernel", c.Image.KernelPath}
 	runDir := channelDir(dir, epoch)
-	a = append(a, "-device", "virtio-serial-device,id=guestserial", "-chardev", "socket,id=guestcontrol,path="+strings.ReplaceAll(filepath.Join(runDir, "control.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestcontrol,name=safeagent.control", "-chardev", "socket,id=guestterminal,path="+strings.ReplaceAll(filepath.Join(runDir, "terminal.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestterminal,name=safeagent.terminal", "-append", "console=ttyS0 panic=-1")
+	a = append(a, "-device", "virtio-serial-device,id=guestserial", "-chardev", "socket,id=guestcontrol,path="+strings.ReplaceAll(filepath.Join(runDir, "control.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestcontrol,name=safeagent.control", "-chardev", "socket,id=guestterminal,path="+strings.ReplaceAll(filepath.Join(runDir, "terminal.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestterminal,name=safeagent.terminal", "-chardev", "socket,id=guestproxy,path="+strings.ReplaceAll(filepath.Join(runDir, "proxy.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestproxy,name=safeagent.proxy", "-append", "console=ttyS0 panic=-1")
 	if c.Image.InitrdPath != "" {
 		a = append(a, "-initrd", c.Image.InitrdPath)
 	}

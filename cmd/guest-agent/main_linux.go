@@ -7,11 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"safeagent/internal/guest/bridge"
+	"safeagent/internal/proxywire"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 	server "safeagent/internal/guest"
@@ -139,8 +144,55 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// 镜像显式启用Bridge；旧PTY镜像不读取不存在的proxy设备。
+	var tasks sync.WaitGroup
+	proxyContext, stopProxy := context.WithCancel(ctx)
+	defer func() { stopProxy(); tasks.Wait() }()
+	if _, statErr := os.Stat("/etc/safeagent/proxy-enabled"); statErr == nil {
+		tasks.Add(1)
+		go func() {
+			defer tasks.Done()
+			listener := device.Listen("/dev/safeagent.proxy")
+			defer listener.Close()
+			done := make(chan struct{})
+			stop := context.AfterFunc(proxyContext, func() { defer close(done); listener.Close() })
+			defer func() {
+				if !stop() {
+					<-done
+				}
+			}()
+			port, openErr := listener.Accept()
+			if openErr != nil {
+				control.Close()
+				return
+			}
+			defer port.Close()
+			b, bridgeErr := bridge.New(proxyContext, port, "model", func() { control.Close() })
+			if bridgeErr != nil {
+				control.Close()
+				return
+			}
+			defer b.Close()
+			httpListener, listenErr := net.Listen("tcp", "127.0.0.1:18080")
+			if listenErr != nil {
+				control.Close()
+				return
+			}
+			// 监听器已绑定后确认Ready，Host收到确认才启动固定工作负载。
+			if readyErr := proxywire.Write(port, proxywire.Frame{Kind: proxywire.Ready}, time.Now().Add(proxywire.Budget)); readyErr != nil {
+				httpListener.Close()
+				return
+			}
+			if serveErr := b.Serve(httpListener); serveErr != nil && proxyContext.Err() == nil {
+				log.Print("Bridge ended: ", serveErr)
+			}
+		}()
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
 	terminal := device.Listen("/dev/safeagent.terminal")
 	err = boot.Serve(ctx, control, terminal)
+	stopProxy()
 	// 控制断线仅撤销授权，工作负载的结束交由 Host 回收整台 VM；不在此隐式 Stop。
 	if ctx.Err() == nil {
 		log.Print("control connection ended; VM restart required: ", err)

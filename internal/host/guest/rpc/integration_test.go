@@ -346,7 +346,15 @@ func TestQEMUTerminalFaults(t *testing.T) {
 			c, prepare, start, channels, tap := qemuTransport(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			start = readyClient(t, c, prepare, start)
+			// 内核启动与准备使用本场景20秒预算，不复用内存服务的5秒辅助函数。
+			if _, err := c.Hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := c.PrepareAgent(ctx, prepare)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start.PreparedID = prepared.PreparedID
 			if _, err := c.StartSession(ctx, start); err != nil {
 				t.Fatal(err)
 			}

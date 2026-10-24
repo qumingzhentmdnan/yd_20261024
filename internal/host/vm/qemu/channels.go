@@ -21,6 +21,8 @@ type channelRun struct {
 	dir string
 	// closed 在 VMM 退出后阻止交付。
 	closed bool
+	// proxyOpened 禁止同boot代理重连。
+	proxyOpened bool
 	// controlOpened 禁止未验证的同 boot 控制重连。
 	controlOpened bool
 	// ctx 在 VMM 退出时取消所有端点连接等待。
@@ -147,4 +149,16 @@ func (c *trackedConn) Close() error {
 	delete(c.run.connections, c)
 	c.run.mu.Unlock()
 	return err
+}
+
+// OpenProxy 交付同一可信实例唯一proxy连接，故障后必须启动新epoch。
+func (c *Channels) OpenProxy(ctx context.Context) (net.Conn, error) {
+	c.run.mu.Lock()
+	if c.run.proxyOpened {
+		c.run.mu.Unlock()
+		return nil, fmt.Errorf("proxy reconnect requires a new VM epoch")
+	}
+	c.run.proxyOpened = true
+	c.run.mu.Unlock()
+	return c.run.open(ctx, "proxy.sock")
 }

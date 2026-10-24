@@ -41,3 +41,7 @@ SAFEAGENT_QEMU_INTEGRATION=1 CGO_ENABLED=1 go test -race ./internal/host/vm/qemu
 ```
 
 真实测试复用 `vmcontract.Run`，另验证重开数据库、同一 overlay、真实退出结果恢复、启动失败和基础盘哈希不变。Manager 的非真实 Driver 测试独立覆盖契约、清理失败重试、异常退出、Unknown 恢复与 SQLite 触发器制造的提交失败。TCG 验证不代表 KVM、其他宿主平台、Guest 就绪或完整安全沙箱验证。
+
+显式TCG使用 `-machine microvm,acpi=off`，避免精简ACPI下TSC校准失败后内核等待无法推进的全局tick。内核通过MP表发现两个vCPU，virtio-mmio通过QEMU生成的内核参数发现；不使用icount，不改变运行时钟速率。KVM保持原参数，不做加速器回退。本后端不承诺ACPI优雅关机，Stop继续按既有显式强停契约执行。失败对照和实测见 `docs/guest-proxy-implementation.md`。
+
+关闭ACPI还会选择QEMU的qboot固件、单IOAPIC和命令行virtio-mmio发现路径；部署QEMU素材必须包含 `qboot.rom`。本机文件位于 `artifacts/toolchain/qemu/usr/share/qemu/qboot.rom`，由工具包装器的 `-L` 搜索路径提供。

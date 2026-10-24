@@ -42,7 +42,7 @@ func TestNewDriverRejectsRelativePaths(t *testing.T) {
 func TestArgsUsesFixedDevicePolicy(t *testing.T) {
 	argv := args(testConfig(t, "args-test"), "/tmp/safeagent-vm", "epoch")
 	joined := " " + strings.Join(argv, " ") + " "
-	for _, want := range []string{" -nic none ", " -nodefaults ", " -no-user-config ", "overlay.qcow2", " -machine microvm "} {
+	for _, want := range []string{" -nic none ", " -nodefaults ", " -no-user-config ", "overlay.qcow2", " -machine microvm,acpi=off "} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %v", want, argv)
 		}
@@ -276,5 +276,22 @@ func TestChannelPathBound(t *testing.T) {
 	}
 	if channelDir(dir, "epoch") == channelDir(dir+"other", "epoch") {
 		t.Fatal("不同资源根不能共享端点目录")
+	}
+}
+
+// TestClockPolicyMatchesAccelerator 验证TCG关闭精简ACPI，KVM参数与vCPU数量不变。
+func TestClockPolicyMatchesAccelerator(t *testing.T) {
+	config := testConfig(t, "clock-policy")
+	config.VCPUs = 2
+	for _, accel := range []vm.Accelerator{vm.TCG, vm.KVM} {
+		config.Accelerator = accel
+		argv := args(config, "/tmp/clock-policy", "epoch")
+		joined := strings.Join(argv, " ")
+		if strings.Contains(joined, "microvm,acpi=off") != (accel == vm.TCG) {
+			t.Fatal("时钟策略错误", argv)
+		}
+		if !strings.Contains(joined, "-smp 2") || strings.Contains(joined, "-icount") {
+			t.Fatal("不得改变vCPU数量或虚拟时钟速率", argv)
+		}
 	}
 }

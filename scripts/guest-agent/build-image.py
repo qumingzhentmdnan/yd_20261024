@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--race', action='store_true')
+    parser.add_argument('--proxy', action='store_true')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     root = args.output.resolve() / 'rootfs'
@@ -39,6 +40,11 @@ while IFS= read -r line; do
 done
 while :; do sleep 1; done
 '''
+    if args.proxy:
+        proxy_command = ['go', 'build'] + (['-race'] if args.race else []) + ['-o', str(root / 'bin/fixed-http'), './cmd/guest-http-probe']
+        subprocess.run(proxy_command, cwd=repo, env=environment, check=True)
+        # 工作负载仍只接受固定命令，不开放任意HTTP目标或脚本执行。
+        workload = workload.replace(b'  size)', b'  http) /bin/fixed-http ;;\n  http-cancel) /bin/fixed-http cancel ;;\n  http-upload) /bin/fixed-http upload ;;\n  http-slow) /bin/fixed-http slow ;;\n  http-abort) /bin/fixed-http abort ;;\n  http-total) /bin/fixed-http total ;;\n  size)')
     config = b'fixed-nonroot-pty-v01\n'
     workspace = b'fixed-workspace-v01\n'
     fixed = root / 'etc/safeagent'
@@ -49,6 +55,8 @@ while :; do sleep 1; done
         (fixed / name).write_bytes(value)
     content = dict(preparedID='registered', manifestRef='fixed-v01', manifestDigest=digest(workload), configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
     registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable='/bin/fixed-workload', directory='/home/agent', content=content)
+    if args.proxy:
+        (fixed / 'proxy-enabled').write_text('model\n')
     (fixed / 'registration.json').write_text(json.dumps(registration))
     (args.output / 'content.json').write_text(json.dumps(content, indent=2) + '\n')
     (root / 'init').write_text('''#!/bin/sh
@@ -62,15 +70,21 @@ mount -t devpts devpts /dev/pts
 chmod 700 /run/safeagent
 chmod 1777 /tmp
 chown 1000:1000 /home/agent
+ip link set lo up
 for entry in /sys/class/virtio-ports/*; do
  name=$(cat "$entry/name")
  ln -s "/dev/${entry##*/}" "/dev/$name"
  chmod 600 "/dev/${entry##*/}"
 done
+# 固定验证结果留在串口，控制失效后仍能观察Guest客户端断言。
 /bin/guest-agent
 # 保留 boot 标记和工作负载状态，由 Host 回收 VM。
 while :; do sleep 60; done
 ''')
+    if args.proxy:
+        init = (root / 'init').read_text()
+        observer = ''.join('(while [ ! -f /tmp/http-' + name + '-result ]; do sleep 0.1; done; cat /tmp/http-' + name + '-result) &\n' for name in ('abort', 'stop'))
+        (root / 'init').write_text(init.replace('/bin/guest-agent\n', observer + '/bin/guest-agent\n'))
     (root / 'init').chmod(0o755)
     with (args.output / 'initramfs.cpio.gz').open('wb') as target:
         subprocess.run(['bash', '-o', 'pipefail', '-c', 'find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -1'], cwd=root, stdout=target, check=True)

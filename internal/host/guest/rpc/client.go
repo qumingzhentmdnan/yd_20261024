@@ -61,6 +61,8 @@ type Client struct {
 	changed chan struct{}
 	// terminal 是当前本地授权，空表示没有授权。
 	terminal *Terminal
+	// hello 标识Hello及初始GetState均已通过，由mu保护。
+	hello bool
 	// failure 保存连接首次失败。
 	failure error
 	// readerDone 在唯一读循环退出后关闭。
@@ -334,6 +336,9 @@ func (c *Client) Hello(ctx context.Context) (protocol.HelloResult, error) {
 		c.fail(err)
 		return result, err
 	}
+	c.mu.Lock()
+	c.hello = true
+	c.mu.Unlock()
 	return result, nil
 }
 
@@ -410,3 +415,26 @@ func (c *Client) WaitSession(ctx context.Context, id protocol.OpaqueID) (protoco
 
 // Close 关闭连接并等待唯一控制读循环退出，保留固定结果。
 func (c *Client) Close() error { c.fail(guest.ErrDisconnected); <-c.readerDone; return nil }
+
+// Identity 返回Host构造且已完成握手的身份，不读取Guest业务payload。
+func (c *Client) Identity() (vm.VMInstance, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.hello || c.failure != nil {
+		return vm.VMInstance{}, "", guest.ErrDisconnected
+	}
+	return c.instance, string(c.id), nil
+}
+
+// Done 在控制连接失效时关闭，不表示VM已被回收。
+func (c *Client) Done() <-chan struct{} { return c.ctx.Done() }
+
+// Probe 在所有资格和响应失败路径使控制连接失效，不追加Cancel预算。
+func (c *Client) Probe(ctx context.Context) error {
+	var result protocol.GuestState
+	err := c.callWithCancellation(ctx, protocol.MethodGetState, protocol.Empty{}, &result, false)
+	if err != nil {
+		c.fail(err)
+	}
+	return err
+}

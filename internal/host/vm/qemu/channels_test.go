@@ -2,7 +2,10 @@ package qemu
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,5 +61,43 @@ func TestTrackedConnectionRelease(t *testing.T) {
 	}
 	if len(run.connections) != 0 {
 		t.Fatal("关闭后仍保留句柄")
+	}
+}
+
+// TestProxyDeliveryAndInvalidation 验证proxy只交付一次、实例退出关闭物理句柄且不再连接。
+func TestProxyDeliveryAndInvalidation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dir := t.TempDir()
+	listener, err := net.Listen("unix", filepath.Join(dir, "proxy.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+	run := &channelRun{dir: dir, ctx: ctx, cancel: cancel, connections: make(map[*trackedConn]bool)}
+	channels := &Channels{run: run}
+	port, err := channels.OpenProxy(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer port.Close()
+	peer := <-accepted
+	defer peer.Close()
+	if _, err = channels.OpenProxy(context.Background()); err == nil {
+		t.Fatal("允许同boot重连")
+	}
+	run.close()
+	peer.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err = peer.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatal("VM退出未交付EOF", err)
+	}
+	if len(run.connections) != 0 {
+		t.Fatal("残留已交付句柄")
 	}
 }

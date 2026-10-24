@@ -22,3 +22,5 @@ CGO_ENABLED=1 go test -race ./internal/host/guest/rpc \
 当前装配不支持同 boot 控制重连：每实例只交付一次 control，断线后 Host 需回收 VM，以新 epoch 重启。Guest 以 boot ID、独占锁及不可重入标记拒绝丢状态后的同 boot 重建。控制断开只撤销授权，不通过 Client.Close 或 EOF 隐式 Stop 工作负载。终端单独 Detach/重绑已测试，但全部设备故障和容量门槛须在验收记录逐项报告。
 
 宿主内存控制通道/Unix 终端 + 真实 PTY 的共享 `guestcontract`、Host wire 故障、容量和慢输出测试随普通 `go test ./...` 运行。Fake、宿主真实 PTY、真实 TCG、跨平台结果需分别记录，不相互替代。
+
+独立 proxy/HTTP Bridge 验证构建时增加 `--proxy`；Guest保持无网卡，仅启用lo。构建固定HTTP测试程序并登记proxy开关，旧PTY镜像无需此开关。新链路复现命令与结果见 `docs/guest-proxy-implementation.md`。固定 `http`、`http-cancel`、`http-upload`、`http-slow` 命令只访问127.0.0.1:18080，不接受任意目标或Host认证。
