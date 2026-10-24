@@ -89,17 +89,26 @@ func EncodeResponse(response Response, request Request) ([]byte, error) {
 
 // DecodeRequest 严格解码 envelope；已知方法还检查独立参数，未知方法保留给 Handler。
 func DecodeRequest(data []byte) (Request, error) {
+	r, err := DecodeRequestEnvelope(data)
+	if err != nil {
+		return r, err
+	}
+	if _, err := r.DecodeParams(); err != nil {
+		if e, ok := err.(*Error); !ok || e.Code != CodeUnimplemented {
+			return r, err
+		}
+	}
+	return r, nil
+}
+
+// DecodeRequestEnvelope 只验证公共 envelope，供 Handler 先检查握手和身份，再验证方法参数。
+func DecodeRequestEnvelope(data []byte) (Request, error) {
 	var r Request
 	if err := Decode(data, &r); err != nil {
 		return r, err
 	}
 	if len(bytes.TrimSpace(r.Params)) == 0 || bytes.TrimSpace(r.Params)[0] != '{' {
 		return r, Failure(CodeInvalidArgument)
-	}
-	if _, err := r.DecodeParams(); err != nil {
-		if e, ok := err.(*Error); !ok || e.Code != CodeUnimplemented {
-			return r, err
-		}
 	}
 	return r, nil
 }

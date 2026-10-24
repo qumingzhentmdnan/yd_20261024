@@ -266,3 +266,15 @@ func newTestManager(qemuPath, qemuImgPath, resourceRoot, databasePath string) (*
 	}
 	return vm.NewManager(context.Background(), databasePath, "qemu", driver)
 }
+
+// TestChannelPathBound 验证最长资源目录和 epoch 不会让 Unix socket 路径超过内核上限。
+func TestChannelPathBound(t *testing.T) {
+	dir := strings.Repeat("long-root/", 20)
+	path := filepath.Join(channelDir(dir, strings.Repeat("e", 128)), "terminal.sock")
+	if len(path) >= 108 {
+		t.Fatalf("Unix socket 路径过长: %d", len(path))
+	}
+	if channelDir(dir, "epoch") == channelDir(dir+"other", "epoch") {
+		t.Fatal("不同资源根不能共享端点目录")
+	}
+}
