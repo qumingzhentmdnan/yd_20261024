@@ -1,0 +1,23 @@
+# Local credentials and agent configuration
+.aws/
+.env
+.env.*
+!.env.example
+
+# Build and runtime artifacts
+/bin/
+/dist/
+/var/
+/artifacts/
+*.qcow2
+*.raw
+*.img
+*.sock
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Local editor / OS files
+.DS_Store
+.idea/
