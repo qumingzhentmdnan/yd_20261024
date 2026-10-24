@@ -27,6 +27,10 @@ type Driver struct {
 	qemuImgPath string
 	// dataRoot 是仅由本后端拥有的资源目录。
 	dataRoot string
+	// channelsMu 保护本驱动启动的私有端点记录。
+	channelsMu sync.Mutex
+	// channels 仅记录当前进程实际启动的实例，不从磁盘恢复授权。
+	channels map[vm.VMInstance]*channelRun
 }
 
 // process 保存进程句柄和停止请求，进程只由 Manager 的观察者回收。
@@ -39,6 +43,10 @@ type process struct {
 	mu sync.Mutex
 	// stopRequested 表示已请求 SIGKILL，不代表进程已经退出。
 	stopRequested bool
+	// driver 在真实退出后回收当前运行的端点映射。
+	driver *Driver
+	// channels 在实际 VMM 退出后失效全部 Guest 句柄。
+	channels *channelRun
 }
 
 var _ vm.Driver = (*Driver)(nil)
@@ -65,7 +73,7 @@ func NewDriver(qemuPath, qemuImgPath, dataRoot string) (*Driver, error) {
 	if !info.IsDir() || info.Mode().Perm() != 0700 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Getuid()) {
 		return nil, fmt.Errorf("%w: data root must be owned private directory", vm.ErrInvalidConfig)
 	}
-	return &Driver{qemuPath: qemuPath, qemuImgPath: qemuImgPath, dataRoot: dataRoot}, nil
+	return &Driver{qemuPath: qemuPath, qemuImgPath: qemuImgPath, dataRoot: dataRoot, channels: make(map[vm.VMInstance]*channelRun)}, nil
 }
 
 // Prepare 创建或核验本后端资源，不覆盖已有差分盘。
@@ -138,12 +146,22 @@ func (d *Driver) Launch(ctx context.Context, c vm.VMConfig, i vm.VMInstance) (vm
 		return nil, err
 	}
 	dir := filepath.Join(d.dataRoot, c.ID)
+	runDir := channelDir(dir, i.Epoch)
+	if err := os.Mkdir(runDir, 0700); err != nil {
+		return nil, err
+	}
+	runCtx, runCancel := context.WithCancel(context.Background())
+	run := &channelRun{ctx: runCtx, cancel: runCancel, dir: runDir, connections: make(map[*trackedConn]bool)}
 	cmd := exec.Command(d.qemuPath, args(c, dir, i.Epoch)...)
 	cmd.Dir = dir
 	if err := cmd.Start(); err != nil {
+		run.close()
 		return nil, err
 	}
-	return &process{cmd: cmd, instance: i}, nil
+	d.channelsMu.Lock()
+	d.channels[i] = run
+	d.channelsMu.Unlock()
+	return &process{cmd: cmd, instance: i, channels: run, driver: d}, nil
 }
 
 // Remove 删除私有目录，保留数据库与不可变基础盘。
@@ -174,6 +192,12 @@ func (p *process) Stop(o vm.StopOptions) error {
 // Wait 从实际进程状态提取退出结果，只由 Manager 观察者调用一次。
 func (p *process) Wait() (vm.VMExit, error) {
 	err := p.cmd.Wait()
+	p.channels.close()
+	p.driver.channelsMu.Lock()
+	if p.driver.channels[p.instance] == p.channels {
+		delete(p.driver.channels, p.instance)
+	}
+	p.driver.channelsMu.Unlock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	exit := vm.VMExit{Instance: p.instance, Reason: vm.ExitProcess}
@@ -212,6 +236,8 @@ func accelerator(a vm.Accelerator) error {
 // args 构造固定的 QEMU 参数。
 func args(c vm.VMConfig, dir, epoch string) []string {
 	a := []string{"-machine", string(c.Machine), "-accel", string(c.Accelerator), "-cpu", "max", "-m", strconv.Itoa(int(c.MemoryMiB)), "-smp", strconv.Itoa(int(c.VCPUs)), "-nodefaults", "-no-user-config", "-display", "none", "-no-reboot", "-nic", "none", "-serial", "none", "-drive", "file=" + strings.ReplaceAll(filepath.Join(dir, "overlay.qcow2"), ",", ",,") + ",if=none,format=qcow2,id=workspace", "-device", "virtio-blk-device,drive=workspace", "-name", epoch, "-kernel", c.Image.KernelPath}
+	runDir := channelDir(dir, epoch)
+	a = append(a, "-device", "virtio-serial-device,id=guestserial", "-chardev", "socket,id=guestcontrol,path="+strings.ReplaceAll(filepath.Join(runDir, "control.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestcontrol,name=safeagent.control", "-chardev", "socket,id=guestterminal,path="+strings.ReplaceAll(filepath.Join(runDir, "terminal.sock"), ",", ",,")+",server=on,wait=off", "-device", "virtserialport,bus=guestserial.0,chardev=guestterminal,name=safeagent.terminal", "-append", "console=ttyS0 panic=-1")
 	if c.Image.InitrdPath != "" {
 		a = append(a, "-initrd", c.Image.InitrdPath)
 	}
