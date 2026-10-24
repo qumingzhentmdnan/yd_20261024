@@ -22,3 +22,4 @@ frontend/dist/
 # Local editor / OS files
 .DS_Store
 .idea/
+.vscode/

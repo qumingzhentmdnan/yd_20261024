@@ -110,7 +110,7 @@ func (r VMRef) Validate() error {
 type VMInstance struct {
 	// Ref 指向本次运行使用的持久资源。
 	Ref VMRef
-	// Epoch 由后端为本次运行生成，不能跨启动复用。
+	// Epoch 由生命周期实现为本次运行生成，不能跨启动复用。
 	Epoch string
 }
 
@@ -136,7 +136,7 @@ const (
 	StateUnknown  VMState = "unknown"
 )
 
-// VMStatus 是查询快照。首次启动前 Instance 为零值；已退出时 Exit 有值。
+// VMStatus 是查询快照。首次启动前 Instance 为零值；已观察到真实退出结果时 Exit 有值。
 // 返回的指针不能引用可修改的内部状态；Unknown 不能作为安全删除的依据。
 type VMStatus struct {
 	// Ref 标识本次查询的资源。
@@ -145,7 +145,7 @@ type VMStatus struct {
 	State VMState
 	// Instance 是当前或最近一次运行，首次启动前为零值。
 	Instance VMInstance
-	// Exit 是已经观察到的退出结果，未退出时为空。
+	// Exit 是已经观察到的退出结果，未退出或恢复后结果丢失时为空。
 	Exit *VMExit
 }
 

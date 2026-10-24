@@ -9,5 +9,7 @@ var (
 	ErrNotFound            = errors.New("vm: not found")
 	ErrInvalidState        = errors.New("vm: invalid state")
 	ErrStaleInstance       = errors.New("vm: stale instance")
+	ErrExitUnavailable     = errors.New("vm: exit result unavailable after recovery")
+	ErrClosed              = errors.New("vm: manager closed")
 	ErrShutdownUnsupported = errors.New("vm: graceful shutdown unsupported")
 )

@@ -25,6 +25,7 @@ type VMBackend interface {
 	// Wait 的并发调用获得相同退出结果；取消只结束本次等待。非零退出码放在
 	// VMExit 中，不当作查询错误。结果跨重启保留，Destroy 成功后可释放。
 	// 指定运行没有记录时返回 ErrNotFound，即使对应资源仍然存在。
+	// 恢复后运行记录存在但真实退出结果无法取得时返回 ErrExitUnavailable。
 	Wait(context.Context, VMInstance) (VMExit, error)
 
 	// Destroy 只删除 Created 或 Stopped 的私有资源，不删除基础镜像；其他状态返回 ErrInvalidState。

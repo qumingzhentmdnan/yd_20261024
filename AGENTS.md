@@ -24,18 +24,19 @@
 - VM 生命周期的当前契约位于 `internal/host/vm`，后续真实后端复用该定义及 `internal/testkit/vmcontract`，不在各 worktree 中另起接口。
 - 只修改当前任务拥有的文件；变更共享接口或新增依赖时说明具体原因。
 - 按变更运行相关测试。并发代码运行 race 检查，缺少环境时明确标注，不能将未运行记为通过。
-- 完成代码后按下方流程调用 `codexx` 和 Claude CLI 做只读 review，处理有效问题，并在原 session 中复审；记录结论和未解决问题。
+- 完成代码后按下方流程调用 `codexx` 做只读 review，处理有效问题，并在原 session 中复审；记录结论和未解决问题。
 - Fake 测试、真实 VM 验证和跨平台验证分别报告，不相互替代。
 
 ## Reviewer 调用与 Session 复用
 
-- 在当前 worktree 根目录执行命令。每个 worktree 分别维护 codexx 和 Claude 的 session，两种工具不能共用 session ID，也不跨 worktree 混用。
-- 将 session ID、worktree 绝对路径、任务主题和实际模型记录在当前 worktree 的 `artifacts/review-sessions/`，不提交运行记录。下方示例在该目录保存 `codexx.id`、`claude.id` 和评审输出。
-- 同一任务的设计讨论、实现评审、修复和复审尽量复用各自原 session。首次无 session 时创建；已有 session 时，仅在上下文无关时才允许创建新 session，并记录原因及旧 ID。不要因一次评审结束、超时或上下文变长就另开 session。
-- session 无法恢复时先检查 ID、工具错误和登录状态，明确报告问题，不静默换新。对同一个 session 的调用必须串行；两个工具可以并行评审。
-- 恢复时传入明确 ID，不使用 `--last` 或不带 ID 的 `--continue`。不要使用 `--ephemeral`、`--no-session-persistence` 或 `--fork-session`。
+- 在当前 worktree 根目录执行命令。每个 worktree 单独维护 codexx 的 session，不跨 worktree 混用。
+- 将 session ID、worktree 绝对路径、任务主题和实际模型记录在当前 worktree 的 `artifacts/review-sessions/`，不提交运行记录。下方示例在该目录保存 `codexx.id` 和评审输出。
+- 同一任务的设计讨论、实现评审、修复和复审尽量复用原 session。首次无 session 时创建；已有 session 时，仅在上下文无关时才允许创建新 session，并记录原因及旧 ID。不要因一次评审结束、超时或上下文变长就另开 session。
+- session 无法恢复时先检查 ID、工具错误和登录状态，明确报告问题，不静默换新。对同一个 session 的调用必须串行。
+- 恢复时传入明确 ID，不使用 `--last` 或不带 ID 的 `--continue`。不要使用 `--ephemeral`。
 - 评审提示词应包含任务目标、文件范围（包含相关未跟踪文件）、当前改动和测试结果；复审时说明修复点，要求重新读取当前文件。要求 reviewer 只读，禁止修改文件、Git 写操作、读取凭据和递归调用其他 reviewer 或子 Agent。主 Agent 判断问题是否有效，修复后重新运行相关检查。
-- codexx 默认使用本会话约定的 `gpt-6.1-sol`、`medium`；用户明确指定时覆盖。Claude CLI 沿用已配置模型，并从输出的 `modelUsage` 记录实际模型；不能仅凭 CLI 名称声称使用了 Anthropic Claude。
+- codexx 调用时显式传入 `-c 'model_provider="xapi"'`，首次调用和恢复均适用；尤其恢复时须放在 `exec resume` 后，避免沿用 session 中保存的其他供应商。
+- codexx 默认使用本会话约定的 `gpt-6.1-sol`、`medium`；用户明确指定时覆盖。
 - 使用正常沙箱和权限机制；遇到限制按环境要求申请权限，不使用绕过审批或沙箱的参数。
 
 ### codexx
@@ -46,6 +47,7 @@
 mkdir -p artifacts/review-sessions
 review_dir="$PWD/artifacts/review-sessions"
 codexx -a never -s read-only exec \
+  -c 'model_provider="xapi"' \
   -m gpt-6.1-sol -c 'model_reasoning_effort="medium"' \
   --json -o "$review_dir/codexx-reply.txt" - \
   < "$review_dir/prompt.txt" > "$review_dir/codexx-events.jsonl"
@@ -56,38 +58,11 @@ codexx -a never -s read-only exec \
 ```sh
 review_dir="$PWD/artifacts/review-sessions"
 codexx -a never -s read-only exec resume \
+  -c 'model_provider="xapi"' \
   -m gpt-6.1-sol -c 'model_reasoning_effort="medium"' \
   --json -o "$review_dir/codexx-reply.txt" \
   "$(cat "$review_dir/codexx.id")" "$(cat "$review_dir/prompt.txt")" \
   > "$review_dir/codexx-events.jsonl"
 ```
 
-### Claude CLI
-
-首次调用可以预生成 UUID 并通过 `--session-id` 指定；已有会话必须使用 `--resume`。以下首次命令仅在没有对应任务 session 时执行：
-
-```sh
-mkdir -p artifacts/review-sessions
-review_dir="$PWD/artifacts/review-sessions"
-python3 -c 'import uuid; print(uuid.uuid4())' > "$review_dir/claude.id"
-claude -p --session-id "$(cat "$review_dir/claude.id")" \
-  --permission-mode plan --permission-prompts none \
-  --tools 'Read,Grep,Glob' --allowedTools 'Read,Grep,Glob' \
-  --strict-mcp-config --disable-slash-commands --output-format json \
-  "$(cat "$review_dir/prompt.txt")" < /dev/null > "$review_dir/claude-reply.json"
-```
-
-后续调用：
-
-```sh
-review_dir="$PWD/artifacts/review-sessions"
-claude -p --resume "$(cat "$review_dir/claude.id")" \
-  --permission-mode plan --permission-prompts none \
-  --tools 'Read,Grep,Glob' --allowedTools 'Read,Grep,Glob' \
-  --strict-mcp-config --disable-slash-commands --output-format json \
-  "$(cat "$review_dir/prompt.txt")" < /dev/null > "$review_dir/claude-reply.json"
-```
-
-检查退出码、`is_error`、`subtype`、`session_id`、`result` 和 `modelUsage`。上述工具白名单只允许读取文件，主 Agent 应把 diff 和测试结果写入提示词。每轮输出在下一轮前归档，避免覆盖评审证据。
-
-调用方式已通过两轮真实会话验证，验证范围及模型情况见 `docs/reviewer-session-validation.md`。
+每轮输出在下一轮前归档，避免覆盖评审证据。
