@@ -8,11 +8,15 @@
 /bin/
 /dist/
 /var/
-/artifacts/
+/artifacts/*
+!/artifacts/go.mod
 *.qcow2
 *.raw
 *.img
 *.sock
+.worktrees/
+__pycache__/
+*.pyc
 
 # Frontend
 node_modules/
@@ -21,3 +25,4 @@ frontend/dist/
 # Local editor / OS files
 .DS_Store
 .idea/
+.vscode/

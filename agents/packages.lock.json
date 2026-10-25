@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "agents": {
+    "codex": {
+      "version": "0.114.0",
+      "model": "gpt-5.4",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.114.0-linux-x64.tgz",
+      "archive": "codex.tgz",
+      "sha256": "200b2f5599d3fc707002cac66613507b9b5a16cd9154c7dfbbbcdb17060b08bd",
+      "executable": "package/vendor/x86_64-unknown-linux-musl/codex/codex",
+      "sha256Executable": "847939c01c628eaad8a8754ac9eb365c03c55a24d5264a6f2deba8fc67c909b4",
+      "rg": "package/vendor/x86_64-unknown-linux-musl/path/rg",
+      "sha256Rg": "ebeaf56f8a25e102e9419933423738b3a2a613a444fd749d695e15eba53f71f2"
+    },
+    "claude": {
+      "version": "2.1.81",
+      "model": "claude-sonnet-4-6",
+      "url": "https://downloads.claude.ai/claude-code-releases/2.1.81/linux-x64/claude",
+      "archive": "claude",
+      "sha256": "047e3f5591d6238b08dd9518729ac335b0e8df1c80fe985e5d7fbda2c18fc281",
+      "sha256Executable": "047e3f5591d6238b08dd9518729ac335b0e8df1c80fe985e5d7fbda2c18fc281"
+    }
+  },
+  "runtime": [
+    {
+      "package": "libc6",
+      "version": "2.39-0ubuntu8.9",
+      "archive": "libc6_2.39-0ubuntu8.9_amd64.deb",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.39-0ubuntu8.9_amd64.deb",
+      "sha256": "ff5557d99b51f761c4b7c92368b9cc45565eda17df9bf9eb4b134d09825008be"
+    },
+    {
+      "package": "bash",
+      "version": "5.2.21-2ubuntu4",
+      "archive": "bash_5.2.21-2ubuntu4_amd64.deb",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/b/bash/bash_5.2.21-2ubuntu4_amd64.deb",
+      "sha256": "73de311a21e094e29ac01527d2b52226cc87fde0a5b57032902251b426d92c66"
+    },
+    {
+      "package": "libtinfo6",
+      "version": "6.4+20240113-1ubuntu2.2",
+      "archive": "libtinfo6_6.4+20240113-1ubuntu2.2_amd64.deb",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo6_6.4+20240113-1ubuntu2.2_amd64.deb",
+      "sha256": "b67a6df2bdab61d273eabebd208bb6a3fb12618a390a067e1ee305a409ff03d9"
+    }
+  ]
+}

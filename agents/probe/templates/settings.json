@@ -1,0 +1,13 @@
+{
+  "home": "${home}",
+  "workspace": "${workspace}",
+  "model": {
+    "base_url": "${modelGatewayURL}",
+    "api_key": "proxy-managed"
+  },
+  "features": {
+    "stream": true,
+    "limit": 128
+  },
+  "labels": ["probe", "literal quote: \" and slash: \\"]
+}

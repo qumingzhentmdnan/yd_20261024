@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SafeAgent · 隔离开发工作台</title><link rel="stylesheet" href="/assets/xterm.css"><link rel="stylesheet" href="/assets/style.css"></head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">S</span><span>SafeAgent</span><small>隔离开发工作台</small></div>
+    <nav><a class="nav-item active" href="#workspace"><span>▦</span>工作区</a><a class="nav-item" href="#connectionsView"><span>⌁</span>连接与 MCP</a><a class="nav-item" href="#activityView"><span>◷</span>活动记录</a></nav>
+    <div class="sidebar-foot"><div class="secure-pill"><i></i>本机安全模式</div><button class="user-chip" id="githubLogin"><span class="avatar">GH</span><span><b id="loginLabel">登录 GitHub</b><small id="loginHint">同步项目与偏好</small></span><span class="chevron">›</span></button></div>
+  </aside>
+  <main class="content">
+    <header class="topbar"><div><div class="eyebrow">WORKSPACE / LOCAL</div><h1 id="pageTitle">你好，开始一次隔离工作</h1></div><div class="top-actions"><span class="connection"><i></i>仅本机连接</span></div></header>
+    <section id="workspace" class="workspace-grid nav-view active-view">
+      <div class="main-column">
+        <section class="card setup-card"><div class="section-heading"><div><h2>新建隔离会话</h2><p>选择一个项目，Agent 将在独立 VM 中工作。</p></div><span class="step-badge">1 / 2</span></div>
+          <form id="setup"><div class="form-grid two"><label class="field"><span>选择 Agent</span><div class="select-wrap"><select id="agent"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></div></label><label class="field"><span>模型 <em>可选</em></span><input id="model" value="gpt-6.1-sol" placeholder="gpt-6.1-sol" autocomplete="off"></label></div>
+          <label class="field"><span>模型服务地址</span><input id="origin" type="url" placeholder="https://api.openai.com" required></label>
+          <label class="field"><span>API Key <em>仅本次会话使用，不会进入 VM</em></span><input id="key" type="password" autocomplete="off" placeholder="sk-••••••••••••" required></label>
+          <div class="project-row"><label class="field grow"><span>项目目录</span><input id="project" required placeholder="选择项目目录" readonly></label><button id="chooseProject" type="button" class="secondary browse">选择目录</button><button id="list" type="button" class="secondary browse">读取文件</button></div>
+          <div id="files" class="file-list empty"><span class="empty-icon">⌁</span><span>输入项目路径后读取可导入文件</span></div>
+          <details id="connections"><summary><span class="summary-icon">⌁</span><span>连接远程 MCP 工具</span><span class="optional">可选</span></summary><div class="details-body"><div class="form-grid two"><label class="field"><span>服务名称</span><input id="mcpRef" placeholder="docs"></label><label class="field"><span>HTTPS 端点</span><input id="mcpURL" type="url" placeholder="https://example.com/mcp"></label></div><label class="field"><span>Bearer Token</span><input id="mcpKey" type="password" autocomplete="off"></label><label class="field"><span>允许的工具名 <em>逗号分隔</em></span><input id="mcpTools" placeholder="search, read_document"></label><label class="check"><input id="mcpConfirm" type="checkbox"><span>我确认这些工具只读，并授权本次会话调用</span></label></div></details>
+          <div class="form-foot"><p class="privacy"><span>▣</span> 密钥保留在本机内存，VM 无网络与共享目录。</p><button type="submit" class="primary start"><span>▶</span>启动隔离会话</button></div></form></section>
+        <section id="reviewBox" class="card review-card" hidden><div class="section-heading"><div><h2>审核变更</h2><p>确认后才会将变更写回宿主项目。</p></div><span class="review-lock">冻结快照</span></div><pre id="diff"></pre><div class="review-actions"><button id="retain" class="secondary">保留副本并结束</button><button id="apply" class="primary">确认并回写项目</button></div></section>
+      </div>
+      <section class="card sandboxes-card"><div class="section-heading"><div><h2>当前活跃沙箱</h2><p>正在运行的隔离 VM 会显示在这里。</p></div><span class="live-label"><i></i>实时</span></div><div id="sandboxList" class="sandbox-list"><div class="empty-panel"><strong>当前没有活跃沙箱</strong><p>启动隔离会话后，状态和项目会显示在这里。</p></div></div></section>
+    </section>
+    <section id="terminalView" class="card page-view nav-view terminal-page" hidden>
+      <div class="section-heading"><div><h2>终端</h2><p id="terminalSub">会话启动后，Agent 将在这里运行。</p></div><div class="terminal-actions"><span class="status-dot" id="terminalDot"></span><span id="terminalState">未连接</span><button id="review" class="small-btn">停止并审核</button><button id="stop" class="small-btn">中止</button></div></div>
+      <div id="terminal" aria-label="VM终端"></div><div class="terminal-hint">点击终端输入 · 支持方向键、Ctrl-C 和粘贴</div>
+    </section>
+    <section id="connectionsView" class="card page-view nav-view" hidden>
+      <div class="section-heading"><div><h2>连接与 MCP</h2><p>配置只读工具连接；令牌只在当前 Host 会话内存中使用。</p></div><button id="newMCP" class="primary">添加连接</button></div>
+      <div id="mcpList" class="connection-list"><div class="empty-panel"><span>⌁</span><strong>还没有保存的连接</strong><p>添加后可在新建会话中选择。敏感令牌不会保存到浏览器。</p><button class="secondary add-mcp">添加第一个连接</button></div></div>
+      <div id="mcpEditor" class="editor-panel" hidden><div class="form-grid two"><label class="field"><span>服务名称</span><input id="savedMcpRef" placeholder="docs"></label><label class="field"><span>HTTPS 端点</span><input id="savedMcpURL" type="url" placeholder="https://example.com/mcp"></label></div><label class="field"><span>Bearer Token <em>关闭页面后需重新输入</em></span><input id="savedMcpKey" type="password" autocomplete="off"></label><label class="field"><span>允许的只读工具名</span><input id="savedMcpTools" placeholder="search, read_document"></label><div class="editor-actions"><button id="cancelMcp" class="secondary">取消</button><button id="saveMcp" class="primary">保存连接</button></div></div>
+    </section>
+    <section id="activityView" class="card page-view nav-view" hidden>
+      <div class="section-heading"><div><h2>活动记录</h2><p>当前页面生命周期内的操作记录。</p></div><button id="clearActivity" class="secondary">清空记录</button></div><div id="activityTimeline" class="timeline"><div class="empty-panel"><span>◷</span><strong>还没有活动</strong><p>启动会话、读取项目和审核变更会显示在这里。</p></div></div>
+    </section>
+    <div id="statusToast" role="status" aria-live="polite"></div><div id="directoryDialog" class="dialog-backdrop" hidden><section class="dialog directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directoryTitle"><button id="closeDirectory" class="dialog-close" aria-label="关闭">×</button><h2 id="directoryTitle">选择项目目录</h2><div class="directory-path" id="directoryPath"></div><div id="directoryList" class="directory-list"></div><div class="dialog-actions"><button id="directoryUp" class="secondary">上一级</button><button id="selectDirectory" class="primary">选择当前目录</button></div></section></div>
+  </main>
+</div>
+<script src="/assets/xterm.js"></script><script src="/assets/addon-fit.js"></script><script src="/assets/app.js"></script>
+</body></html>

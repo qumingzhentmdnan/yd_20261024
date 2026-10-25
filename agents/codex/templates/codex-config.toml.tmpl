@@ -1,0 +1,16 @@
+{
+  "model": "gpt-5.4",
+  "model_provider": "safeagent",
+  "approval_policy": "on-request",
+  "sandbox_mode": "workspace-write",
+  "model_providers": {
+    "safeagent": {
+      "name": "Host model proxy",
+      "base_url": "${modelGatewayURL}/v1",
+      "env_key": "SAFEAGENT_PROXY_KEY",
+      "wire_api": "responses",
+      "requires_openai_auth": false,
+      "supports_websockets": false
+    }
+  }
+}

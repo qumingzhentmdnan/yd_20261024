@@ -1,0 +1,1586 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safeagent.invalid/design/guest-protocol-v0.1.schema.json",
+  "title": "Guest \u63a7\u5236\u4e0e\u7ec8\u7aef v0.1 \u5019\u9009\u8d1f\u8f7d\u5951\u7ea6",
+  "description": "\u5c1a\u672a\u51bb\u7ed3\u7684\u751f\u4ea7\u76ee\u6807\uff1b\u4e0d\u58f0\u79f0\u5f53\u524d spike \u5b8c\u5168\u7b26\u5408\u3002\u91cd\u590dJSON\u952e\u3001UTF-8\u3001\u5e27\u957f\u5ea6\u3001\u5e8f\u53f7\u4e0a\u754c\u3001\u72b6\u6001\u4e0e\u8de8\u5b57\u6bb5\u7ea6\u675f\u7531\u6587\u672c\u89c4\u8303\u8865\u5145\u3002",
+  "$defs": {
+    "OpaqueID": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$(?![\\s\\S])"
+    },
+    "VMRef": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$(?![\\s\\S])"
+    },
+    "Epoch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "\u539f\u6837\u4f7f\u7528 vm.VMInstance.Epoch\uff0c\u4e0d\u8981\u6c42 UUID\uff1bGuest \u901a\u9053\u5019\u9009\u989d\u5916\u9650\u5b9a\u4e3a1..128\u4e2aUnicode\u5b57\u7b26\uff0c\u4e0d\u4fee\u6539VM\u751f\u547d\u5468\u671f\u5951\u7ea6\u3002",
+      "maxLength": 128
+    },
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$(?![\\s\\S])"
+    },
+    "Nonce": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$(?![\\s\\S])"
+    },
+    "Sequence": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,19}$(?![\\s\\S])",
+      "description": "\u53e6\u6309\u65e0\u7b26\u53f764\u4f4d\u6574\u6570\u68c0\u67e5 <=18446744073709551615\uff1b\u5341\u8fdb\u5236\u6587\u672c\u907f\u514dJSON\u6570\u503c\u7cbe\u5ea6\u4e22\u5931\u3002"
+    },
+    "StreamID": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "Dimension": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "INVALID_ARGUMENT",
+            "UNIMPLEMENTED",
+            "FAILED_PRECONDITION",
+            "STALE_INSTANCE",
+            "CONFLICT",
+            "NOT_FOUND",
+            "RESOURCE_EXHAUSTED",
+            "CANCELLED",
+            "DEADLINE_EXCEEDED",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "Empty": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "Exit": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "code": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 255
+        },
+        "signal": {
+          "type": "string",
+          "pattern": "^(|SIG[A-Z0-9]+(\\+[0-9]+)?)$(?![\\s\\S])",
+          "maxLength": 32,
+          "description": "Linux\u7b26\u53f7\u4fe1\u53f7\u540d\uff0c\u4f8b\u5982SIGTERM/SIGKILL\uff1b\u5b9e\u65f6\u4fe1\u53f7\u4f7f\u7528SIGRTMIN+N\uff1b\u6b63\u5e38\u9000\u51fa\u4e3a\u7a7a\u5b57\u7b26\u4e32\u3002"
+        },
+        "reason": {
+          "enum": [
+            "process-exited",
+            "stopped",
+            "forced"
+          ]
+        }
+      },
+      "required": [
+        "sessionID",
+        "code",
+        "signal",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "signal": {
+                "const": ""
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "minimum": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "code": {
+                "const": -1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SessionInfo": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "preparedID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "workspaceRef": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "workspaceDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "exited"
+          ]
+        },
+        "groupState": {
+          "enum": [
+            "running",
+            "empty",
+            "unknown"
+          ]
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Exit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sessionID",
+        "preparedID",
+        "workspaceRef",
+        "workspaceDigest",
+        "state",
+        "groupState",
+        "exit"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "running"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "exit": {
+                "$ref": "#/$defs/Exit"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Preparation": {
+      "type": "object",
+      "properties": {
+        "preparedID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "manifestRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_@.\\-]{0,127}$(?![\\s\\S])"
+        },
+        "manifestDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "configDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "workspaceRef": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "workspaceDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "planDigest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "preparedID",
+        "manifestRef",
+        "manifestDigest",
+        "configDigest",
+        "workspaceRef",
+        "workspaceDigest"
+      ],
+      "additionalProperties": false
+    },
+    "GuestState": {
+      "type": "object",
+      "properties": {
+        "prepared": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preparation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/SessionInfo"
+          }
+        },
+        "currentSessionID": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpaqueID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attachment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachmentInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "prepared",
+        "sessions",
+        "currentSessionID",
+        "attachment"
+      ],
+      "additionalProperties": false
+    },
+    "HelloParams": {
+      "type": "object",
+      "properties": {
+        "vmRef": {
+          "$ref": "#/$defs/VMRef"
+        },
+        "challenge": {
+          "$ref": "#/$defs/Nonce"
+        },
+        "supportedVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "const": "0.1"
+          }
+        }
+      },
+      "required": [
+        "vmRef",
+        "challenge",
+        "supportedVersions"
+      ],
+      "additionalProperties": false
+    },
+    "HelloRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "Hello"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/HelloParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "GetStateParams": {
+      "$ref": "#/$defs/Empty"
+    },
+    "GetStateRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "GetState"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/GetStateParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "PrepareAgentParams": {
+      "type": "object",
+      "properties": {
+        "operationID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "manifestRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_@.\\-]{0,127}$(?![\\s\\S])"
+        },
+        "manifestDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "configDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "workspaceRef": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "workspaceDigest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "operationID",
+        "manifestRef",
+        "manifestDigest",
+        "configDigest",
+        "workspaceRef",
+        "workspaceDigest"
+      ],
+      "additionalProperties": false
+    },
+    "PrepareAgentRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "PrepareAgent"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/PrepareAgentParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "StartSessionParams": {
+      "type": "object",
+      "properties": {
+        "operationID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "preparedID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "workspaceRef": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "workspaceDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "rows": {
+          "$ref": "#/$defs/Dimension"
+        },
+        "cols": {
+          "$ref": "#/$defs/Dimension"
+        }
+      },
+      "required": [
+        "operationID",
+        "sessionID",
+        "preparedID",
+        "workspaceRef",
+        "workspaceDigest",
+        "rows",
+        "cols"
+      ],
+      "additionalProperties": false
+    },
+    "StartSessionRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "StartSession"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/StartSessionParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "AttachTerminalParams": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "streamID": {
+          "$ref": "#/$defs/StreamID"
+        }
+      },
+      "required": [
+        "sessionID",
+        "streamID"
+      ],
+      "additionalProperties": false
+    },
+    "AttachTerminalRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "AttachTerminal"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/AttachTerminalParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "ResizeTerminalParams": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "streamID": {
+          "$ref": "#/$defs/StreamID"
+        },
+        "rows": {
+          "$ref": "#/$defs/Dimension"
+        },
+        "cols": {
+          "$ref": "#/$defs/Dimension"
+        }
+      },
+      "required": [
+        "sessionID",
+        "streamID",
+        "rows",
+        "cols"
+      ],
+      "additionalProperties": false
+    },
+    "ResizeTerminalRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "ResizeTerminal"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/ResizeTerminalParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "DetachTerminalParams": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "streamID": {
+          "$ref": "#/$defs/StreamID"
+        }
+      },
+      "required": [
+        "sessionID",
+        "streamID"
+      ],
+      "additionalProperties": false
+    },
+    "DetachTerminalRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "DetachTerminal"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/DetachTerminalParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "StopSessionParams": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "graceMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "forceAfterTimeout": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sessionID",
+        "graceMs",
+        "forceAfterTimeout"
+      ],
+      "additionalProperties": false
+    },
+    "StopSessionRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "StopSession"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/StopSessionParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "Request": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HelloRequest"
+        },
+        {
+          "$ref": "#/$defs/GetStateRequest"
+        },
+        {
+          "$ref": "#/$defs/PrepareAgentRequest"
+        },
+        {
+          "$ref": "#/$defs/StartSessionRequest"
+        },
+        {
+          "$ref": "#/$defs/AttachTerminalRequest"
+        },
+        {
+          "$ref": "#/$defs/ResizeTerminalRequest"
+        },
+        {
+          "$ref": "#/$defs/DetachTerminalRequest"
+        },
+        {
+          "$ref": "#/$defs/StopSessionRequest"
+        },
+        {
+          "$ref": "#/$defs/ListChangesRequest"
+        },
+        {
+          "$ref": "#/$defs/ReadChangeChunkRequest"
+        }
+      ]
+    },
+    "RequestEnvelope": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "HelloResult": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": "0.1"
+        },
+        "challenge": {
+          "$ref": "#/$defs/Nonce"
+        },
+        "guestBuild": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "imageDigest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "version",
+        "challenge",
+        "guestBuild",
+        "imageDigest"
+      ],
+      "additionalProperties": false
+    },
+    "HelloResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HelloSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "GetStateResult": {
+      "$ref": "#/$defs/GuestState"
+    },
+    "GetStateResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/GetStateSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "PrepareAgentResult": {
+      "$ref": "#/$defs/Preparation"
+    },
+    "PrepareAgentResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PrepareAgentSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "StartSessionResult": {
+      "$ref": "#/$defs/SessionInfo"
+    },
+    "StartSessionResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StartSessionSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "AttachTerminalResult": {
+      "type": "object",
+      "properties": {
+        "streamID": {
+          "$ref": "#/$defs/StreamID"
+        },
+        "bindToken": {
+          "$ref": "#/$defs/Nonce"
+        }
+      },
+      "required": [
+        "streamID",
+        "bindToken"
+      ],
+      "additionalProperties": false
+    },
+    "AttachTerminalResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AttachTerminalSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "ResizeTerminalResult": {
+      "$ref": "#/$defs/Empty"
+    },
+    "ResizeTerminalResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ResizeTerminalSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "DetachTerminalResult": {
+      "$ref": "#/$defs/Empty"
+    },
+    "DetachTerminalResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DetachTerminalSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "StopSessionResult": {
+      "$ref": "#/$defs/Empty"
+    },
+    "StopSessionResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StopSessionSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "Response": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HelloResponse"
+        },
+        {
+          "$ref": "#/$defs/GetStateResponse"
+        },
+        {
+          "$ref": "#/$defs/PrepareAgentResponse"
+        },
+        {
+          "$ref": "#/$defs/StartSessionResponse"
+        },
+        {
+          "$ref": "#/$defs/AttachTerminalResponse"
+        },
+        {
+          "$ref": "#/$defs/ResizeTerminalResponse"
+        },
+        {
+          "$ref": "#/$defs/DetachTerminalResponse"
+        },
+        {
+          "$ref": "#/$defs/StopSessionResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        },
+        {
+          "$ref": "#/$defs/ListChangesResponse"
+        },
+        {
+          "$ref": "#/$defs/ReadChangeChunkResponse"
+        }
+      ]
+    },
+    "Cancel": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID"
+      ],
+      "additionalProperties": false
+    },
+    "SessionExitedEvent": {
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "eventID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "event": {
+          "const": "SessionExited"
+        },
+        "params": {
+          "$ref": "#/$defs/Exit"
+        }
+      },
+      "required": [
+        "epoch",
+        "connectionID",
+        "eventID",
+        "event",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "Bind": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "bindToken": {
+          "$ref": "#/$defs/Nonce"
+        }
+      },
+      "required": [
+        "sessionID",
+        "epoch",
+        "connectionID",
+        "bindToken"
+      ],
+      "additionalProperties": false
+    },
+    "Bound": {
+      "type": "object",
+      "properties": {
+        "droppedBytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$(?![\\s\\S])",
+          "description": "\u7d2f\u8ba1\u4e22\u5f03\u5b57\u8282\u6570\uff0c\u53e6\u68c0\u67e5uint64\u4e0a\u754c\u3002"
+        }
+      },
+      "required": [
+        "droppedBytes"
+      ],
+      "additionalProperties": false
+    },
+    "Abort": {
+      "$ref": "#/$defs/Error"
+    },
+    "AttachmentInfo": {
+      "type": "object",
+      "properties": {
+        "sessionID": {
+          "$ref": "#/$defs/OpaqueID"
+        },
+        "streamID": {
+          "$ref": "#/$defs/StreamID"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "state": {
+          "enum": [
+            "awaiting-bind",
+            "bound",
+            "detaching"
+          ]
+        }
+      },
+      "required": [
+        "sessionID",
+        "streamID",
+        "connectionID",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "HelloSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/HelloResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "GetStateSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/GetStateResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "PrepareAgentSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/PrepareAgentResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "StartSessionSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/StartSessionResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "AttachTerminalSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/AttachTerminalResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "ResizeTerminalSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/ResizeTerminalResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "DetachTerminalSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/DetachTerminalResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "StopSessionSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/StopSessionResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "ListChangesParams": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        }
+      },
+      "required": [
+        "cursor"
+      ],
+      "additionalProperties": false
+    },
+    "ReadChangeChunkParams": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))[^/\\\\]+(?:/[^/\\\\]+)*$(?![\\s\\S])"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        }
+      },
+      "required": [
+        "path",
+        "offset"
+      ],
+      "additionalProperties": false
+    },
+    "ExportEntry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))[^/\\\\]+(?:/[^/\\\\]+)*$(?![\\s\\S])"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "executable": {
+          "type": "boolean"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "executable",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "ListChangesResult": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ExportEntry"
+          }
+        },
+        "next": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        }
+      },
+      "required": [
+        "entries",
+        "next"
+      ],
+      "additionalProperties": false
+    },
+    "ReadChangeChunkResult": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 43692
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "ListChangesRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "ListChanges"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/ListChangesParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "ListChangesSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/ListChangesResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "ListChangesResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ListChangesSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "ReadChangeChunkRequest": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "method": {
+          "const": "ReadChangeChunk"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "params": {
+          "$ref": "#/$defs/ReadChangeChunkParams"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "method",
+        "timeoutMs",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "ReadChangeChunkSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "requestID": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Epoch"
+        },
+        "connectionID": {
+          "$ref": "#/$defs/UUID"
+        },
+        "result": {
+          "$ref": "#/$defs/ReadChangeChunkResult"
+        }
+      },
+      "required": [
+        "requestID",
+        "epoch",
+        "connectionID",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "ReadChangeChunkResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ReadChangeChunkSuccessResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/RequestEnvelope"
+    },
+    {
+      "$ref": "#/$defs/Response"
+    },
+    {
+      "$ref": "#/$defs/Cancel"
+    },
+    {
+      "$ref": "#/$defs/SessionExitedEvent"
+    },
+    {
+      "$ref": "#/$defs/Bind"
+    },
+    {
+      "$ref": "#/$defs/Bound"
+    },
+    {
+      "$ref": "#/$defs/Abort"
+    }
+  ]
+}
