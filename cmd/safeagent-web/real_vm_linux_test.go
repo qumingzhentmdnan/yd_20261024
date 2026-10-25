@@ -37,7 +37,7 @@ func TestRealWebVMExport(t *testing.T) {
 	appServer := httptest.NewUnstartedServer(nil)
 	origin := "http://" + appServer.Listener.Addr().String()
 	app, err := api.New(origin, func(ctx context.Context, req api.Request, interact func(api.Terminal) error, review func(api.Review, func(context.Context) error) error) error {
-		err := launch(ctx, config, content, req, interact, review)
+		err := launch(ctx, config, content, req, interact, review, func(_ func(context.Context) error) {})
 		if err != nil {
 			t.Logf("测试后端错误: %v", err)
 		}

@@ -229,3 +229,27 @@ func TestReviewAfterCLIExit(t *testing.T) {
 		t.Fatal("停止并审核未通知CLI退出会话")
 	}
 }
+
+// TestDeleteStoppedSandbox 验证停止后的沙箱可由用户明确删除并清除列表记录。
+func TestDeleteStoppedSandbox(t *testing.T) {
+	s, err := New("http://127.0.0.1:1234", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	s.SetDestroyer(func(context.Context) error { deleted = true; return nil })
+	s.request = Request{Agent: "codex", Project: "/tmp/project", Model: "gpt-6.1-sol"}
+	s.state = "finished"
+	r := httptest.NewRequest("POST", "http://127.0.0.1:1234/api/delete", strings.NewReader("{}"))
+	r.Header.Set("Authorization", "Bearer "+s.token)
+	w := httptest.NewRecorder()
+	s.Handler(nil, nil).ServeHTTP(w, r)
+	if w.Code != 200 || !deleted {
+		t.Fatalf("status=%d deleted=%v", w.Code, deleted)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.request.Project != "" || s.state != "idle" {
+		t.Fatalf("project=%q state=%s", s.request.Project, s.state)
+	}
+}

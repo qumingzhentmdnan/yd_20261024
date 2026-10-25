@@ -65,12 +65,13 @@ func run() error {
 		return err
 	}
 	defer listener.Close()
-	app, err := api.New("http://"+listener.Addr().String(), func(ctx context.Context, req api.Request, interact func(api.Terminal) error, review func(api.Review, func(context.Context) error) error) error {
+	var app *api.Server
+	app, err = api.New("http://"+listener.Addr().String(), func(ctx context.Context, req api.Request, interact func(api.Terminal) error, review func(api.Review, func(context.Context) error) error) error {
 		c, ok := configs[req.Agent]
 		if !ok {
 			return fmt.Errorf("Agent镜像未登记")
 		}
-		return launch(ctx, c, contents[req.Agent], req, interact, review)
+		return launch(ctx, c, contents[req.Agent], req, interact, review, app.SetDestroyer)
 	})
 	if err != nil {
 		return err
@@ -113,7 +114,7 @@ func run() error {
 }
 
 // launch 为浏览器确认的项目建立独占资源，真实密钥只进入 Host 凭据存储。
-func launch(ctx context.Context, c launchConfig, content protocol.Preparation, req api.Request, interact func(api.Terminal) error, review func(api.Review, func(context.Context) error) error) (result error) {
+func launch(ctx context.Context, c launchConfig, content protocol.Preparation, req api.Request, interact func(api.Terminal) error, review func(api.Review, func(context.Context) error) error, registerDestroy func(func(context.Context) error)) (result error) {
 	credentials := credential.New()
 	defer credentials.Close()
 	service, err := gateway.CLIService(req.Agent, req.Origin, "session-key", c.AllowedNetworks)
@@ -177,6 +178,16 @@ func launch(ctx context.Context, c launchConfig, content protocol.Preparation, r
 	if err != nil {
 		return err
 	}
+	vmID := string(id)
+	destroyDB := filepath.Join(c.DataRoot, "vms.sqlite")
+	registerDestroy(func(ctx context.Context) error {
+		deferredManager, err := vm.NewManager(ctx, destroyDB, "qemu", driver)
+		if err != nil {
+			return err
+		}
+		defer deferredManager.Close()
+		return deferredManager.Destroy(ctx, vm.VMRef{ID: vmID})
+	})
 	config := session.Config{Backend: manager, Driver: driver, Workspace: snapshots, Gateway: modelGateway, VM: vm.VMConfig{ID: string(id), Architecture: vm.AMD64, Machine: vm.MicroVM, Accelerator: c.Accelerator, VCPUs: c.VCPUs, MemoryMiB: c.MemoryMiB, Image: c.Image}, Selection: workspace.ImportSelection{Root: req.Project, Paths: req.Files, Generated: generated}, Content: content, ServiceRefs: refs, Rows: 32, Cols: 100, StartupTimeout: 2 * time.Minute, RetainVM: true}
 	config.Review = func(ctx context.Context, r *workspace.Review) error {
 		return review(api.Review{ID: r.ID(), Changes: len(r.Changes()), Diff: r.Diff()}, func(ctx context.Context) error { return r.Apply(ctx, r.ID()) })

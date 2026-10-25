@@ -112,6 +112,15 @@ type Server struct {
 	request Request
 	// createdAt 保存当前沙箱创建时间，会话未启动时为零值。
 	createdAt time.Time
+	// destroy 删除已经停止的沙箱资源，由Host后端注册。
+	destroy func(context.Context) error
+}
+
+// SetDestroyer 注册停止后删除VM资源的回调。
+func (s *Server) SetDestroyer(destroy func(context.Context) error) {
+	s.mu.Lock()
+	s.destroy = destroy
+	s.mu.Unlock()
 }
 
 // New 为本次本地监听地址创建随机认证上下文。
@@ -282,8 +291,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case "/api/poll":
 		s.mu.Lock()
 		result := map[string]any{"state": s.state, "output": append([]byte(nil), s.output...), "review": s.review, "outputStart": s.outputStart, "outputSession": s.createdAt}
-		if s.running {
-			result["sandboxes"] = []map[string]any{{"id": "current", "state": s.state, "agent": s.request.Agent, "project": s.request.Project, "model": s.request.Model, "createdAt": s.createdAt}}
+		if s.request.Project != "" {
+			result["sandboxes"] = []map[string]any{{"id": "current", "state": s.state, "agent": s.request.Agent, "project": s.request.Project, "model": s.request.Model, "createdAt": s.createdAt, "running": s.running}}
 		} else {
 			result["sandboxes"] = []map[string]any{}
 		}
@@ -378,6 +387,26 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		if s.cancel != nil {
 			s.cancel()
 		}
+		s.mu.Unlock()
+		json.NewEncoder(w).Encode(true)
+	case "/api/delete":
+		s.mu.Lock()
+		if s.running || s.destroy == nil || s.request.Project == "" {
+			s.mu.Unlock()
+			http.Error(w, "沙箱仍在运行或不存在", 409)
+			return
+		}
+		destroy := s.destroy
+		s.mu.Unlock()
+		if err := destroy(r.Context()); err != nil {
+			http.Error(w, "删除沙箱失败", 409)
+			return
+		}
+		s.mu.Lock()
+		s.request = Request{}
+		s.createdAt = time.Time{}
+		s.state = "idle"
+		s.destroy = nil
 		s.mu.Unlock()
 		json.NewEncoder(w).Encode(true)
 	default:
