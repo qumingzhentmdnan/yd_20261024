@@ -36,8 +36,8 @@ type githubAuth struct {
 	mu sync.Mutex
 	// pending 保存一次性 state、PKCE verifier 及过期时间。
 	pending map[string]githubPending
-	// sessions 保存随机会话标识到 GitHub 用户摘要的映射。
-	sessions map[string]githubUser
+	// sessions 保存随机会话标识到带过期时间的 GitHub 用户会话。
+	sessions map[string]githubSession
 }
 
 // githubPending 是待完成 OAuth 授权的短时状态。
@@ -58,6 +58,14 @@ type githubUser struct {
 	AvatarURL string `json:"avatar_url,omitempty"`
 }
 
+// githubSession 保存登录用户和服务端会话过期时间。
+type githubSession struct {
+	// user 是可返回浏览器的 GitHub 用户摘要。
+	user githubUser
+	// expires 是服务端接受该会话的截止时间。
+	expires time.Time
+}
+
 // ConfigureGitHub 启用 GitHub OAuth；配置错误会被立即拒绝。
 func (s *Server) ConfigureGitHub(config GitHubConfig) error {
 	if config.ClientID == "" || config.ClientSecret == "" {
@@ -71,7 +79,7 @@ func (s *Server) ConfigureGitHub(config GitHubConfig) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	s.github = &githubAuth{config: config, client: client, pending: make(map[string]githubPending), sessions: make(map[string]githubUser)}
+	s.github = &githubAuth{config: config, client: client, pending: make(map[string]githubPending), sessions: make(map[string]githubSession)}
 	return nil
 }
 
@@ -230,7 +238,7 @@ func (s *Server) verifyCallback(w http.ResponseWriter, r *http.Request, auth *gi
 		return
 	}
 	auth.mu.Lock()
-	auth.sessions[session] = user
+	auth.sessions[session] = githubSession{user: user, expires: time.Now().Add(24 * time.Hour)}
 	auth.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "safeagent_github_session", Value: session, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(auth.config.RedirectURL, "https://"), MaxAge: 86400})
 	location := "/"
@@ -248,6 +256,12 @@ func (a *githubAuth) session(r *http.Request) (githubUser, bool) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	u, ok := a.sessions[c.Value]
-	return u, ok
+	session, ok := a.sessions[c.Value]
+	if !ok || time.Now().After(session.expires) {
+		if ok {
+			delete(a.sessions, c.Value)
+		}
+		return githubUser{}, false
+	}
+	return session.user, true
 }

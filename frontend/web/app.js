@@ -1,5 +1,5 @@
 'use strict';
-const token=location.hash.slice(1)||sessionStorage.getItem('safeagent_token')||'';if(token)sessionStorage.setItem('safeagent_token',token);history.replaceState(null,'',location.pathname);
+const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);
 let files=[],selectionRoot='',outputText='',reviewID='',inputQueue=Promise.resolve();const decoder=new TextDecoder();const $=id=>document.getElementById(id);
 // api 向当前本地服务发送带认证的 JSON 请求，不持久化凭据。
 async function api(path,body={}){const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});if(!response.ok)throw new Error(await response.text());return response.json();}
@@ -12,7 +12,7 @@ function addActivity(label,kind=''){ $('activityList').querySelector('.muted-row
 // loadGitHubStatus 读取可选的本机 GitHub 登录状态并更新用户卡片。
 async function loadGitHubStatus(){try{const response=await fetch('/api/auth/status',{headers:{'Authorization':'Bearer '+token}});if(!response.ok)return;const result=await response.json();if(result.authenticated&&result.user){$('loginLabel').textContent=result.user.login;$('loginHint').textContent='GitHub 已连接';if(result.user.avatar_url){$('githubLogin').querySelector('.avatar').style.backgroundImage='url('+result.user.avatar_url+')';$('githubLogin').querySelector('.avatar').textContent='';}}else if(!result.enabled){$('loginHint').textContent='本地模式';}}catch(error){/* 登录服务未启用时保持本地工作台可用。 */}}
 // startGitHubLogin 以本地 Bearer 认证启动 OAuth，再跳转到 GitHub 授权页。
-async function startGitHubLogin(){try{const response=await fetch('/api/auth/login',{headers:{'Authorization':'Bearer '+token},redirect:'manual'});const locationURL=response.headers.get('Location');if(response.status>=300&&response.status<400&&locationURL){window.location.href=locationURL;return;}toast('GitHub 登录未启用');}catch(error){showError(error);}}
+async function startGitHubLogin(){try{const result=await api('auth/login');if(result.url){window.location.href=result.url;return;}toast('GitHub 登录未启用');}catch(error){showError(error);}}
 $('githubLogin').onclick=startGitHubLogin;
 $('learnMore').onclick=e=>{e.preventDefault();toast('Agent 在无网络、无共享目录的 VM 中运行；密钥只由 Host 代理使用');};
 $('list').onclick=async()=>{try{const project=$('project').value.trim();if(!project)throw new Error('请先输入项目目录');files=await api('files',{project});selectionRoot=project;$('files').className='file-list';$('files').replaceChildren();for(const file of files){const label=document.createElement('label');const input=document.createElement('input');input.type='checkbox';input.checked=file.selected;input.onchange=()=>file.selected=input.checked;label.append(input,document.createTextNode(file.path+(file.warning?' — '+file.warning:'')));if(file.warning)label.className='warning';$('files').append(label);}addActivity('读取项目文件',project);toast('已加载 '+files.length+' 个候选文件');}catch(error){showError(error);}};
