@@ -96,7 +96,7 @@ func load() (server.Config, error) {
 		return server.Config{}, fmt.Errorf("unknown registration mode %q", entry.Mode)
 	}
 	// 组合摘要由内置目录核验，不能与单份 YAML 的字节摘要比较。
-	catalog, err := manifest.NewCatalog()
+	catalog, err := manifest.NewCatalogFor(string(entry.Content.ManifestRef))
 	if err != nil {
 		return server.Config{}, err
 	}

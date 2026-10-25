@@ -8,7 +8,7 @@
 
 Host→Guest Ready(id=0)，表示可信 Hello/GetState 与 Bind 已完成；Guest 收到 Ready 前不启动 HTTP listener。Guest→Host Request(id递增非零，service/method/path/headers)，Data、End；Host→Guest Response(status/headers)、Data、End 或 Abort（固定无秘密错误）。Host Ready 不携带身份、绑定或上游配置。请求头元数据最多16KiB；HTTP body限1MiB；Gateway仍执行自己的实际配置限额。响应每块16KiB，不按行解析、不更改二进制。
 
-只允许一个在途请求，Guest 用非阻塞资格立即返回503给第二个请求；直到正常End/流关闭才释放。请求体可先在Guest有界缓存，读取总预算10秒，避免客户端上传停滞占据设备读者；Gateway输入仍为可关闭的有界内存body。每个HTTP请求最多60秒，读写空闲预算2秒。HTTP请求头上限16KiB，ReadHeaderTimeout 2秒、IdleTimeout 2秒，HTTP服务只绑定127.0.0.1固定端口。
+只允许一个在途请求，Guest 用非阻塞资格立即返回503给第二个请求；直到正常End/流关闭才释放。请求体可先在Guest有界缓存，读取总预算10秒，避免客户端上传停滞占据设备读者；Gateway输入仍为可关闭的有界内存body。每个HTTP请求最多60秒，上传及写入空闲预算2秒；响应metadata与后续响应帧首字节可等待至该请求60秒总截止，首字节后的完整物理帧仍限2秒，模型静默不视为半帧。Gateway自身idle/total仍独立约束上游，Host独占模型入口将二者显式设为60秒，不增加整个请求总上限。HTTP请求头上限16KiB，ReadHeaderTimeout 2秒、IdleTimeout 2秒，HTTP服务只绑定127.0.0.1固定端口。
 
 正常End后允许同一物理通道的下一递增ID；收到乱序、重复、未知类型/ID、半帧、超长帧即终止通道，不扫描magic。任何中途取消、超时、异常或Abort都使整个proxy通道不可复用，避免迟到数据被下一请求消费。不支持同boot重连、重放、终止确认后复用；终止确认是物理VM回收完成。HTTP响应开始后的异常使用http.ErrAbortHandler关闭HTTP传输，不能输出成功EOF。取消由关闭proxy物理句柄并设置HTTP读写deadline打断；Guest设备Close不保证Host EOF，由独立控制探测兜住。
 
@@ -36,7 +36,7 @@ Guest入口打开proxy设备并等待Ready的任务独立于Boot.Serve；只有p
 
 1. Guest proxy一旦已接入后异常，入口必须同时关闭control Conn，使Boot.Serve退出；入口拥有两个设备和listener并等待任务。Host探测因此会在有界预算内失败，不能只关闭proxy。上传尚未发送任何proxy字节失败只结束本地HTTP请求。
 2. Host读到Request即开始60秒总预算、每帧间2秒空闲预算，累计body硬上限1MiB，独立于Guest和Gateway；头解码同样有16KiB边界。Gateway转发纳入剩余Host请求预算。任一超限/超时销毁通道。
-3. Probe走callWithCancellation(...,false)，到期直接fail，且发送deadline与ctx统一，不追加Cancel。沿用4096请求的既有不可淘汰账本，本轮明确为短时验证会话；耗尽是通道失效并回收VM的容量边界，不承诺长期运行。后续长会话设计单独解决，不盲目放大或淘汰账本。
+3. Probe走callWithCancellation(...,false)，到期直接fail，且发送deadline与ctx统一，不追加Cancel。最初实现保留全部请求4096限制；真实CLI长会话配套变更见 real-cli-transport.md：Host/Guest 将 GetState 排除于非只读历史请求容量，Host 独立最多16个尚未完整验证响应的GetState（含已取消者），仅在完整响应验证或连接终止后释放。非只读4096记录及operation幂等保持，序号不复用；旧镜像不能用于新长会话，不禁用Probe或自动重连。
 4. Session启动/失效由同一生命周期任务拥有：先安装控制失效取消回调；OpenProxy/Bind/Ready均使用此生命周期context，每一步结束复核取消。Bind一旦成功必由统一defer Revoke，所有启动失败也关闭已接管句柄并执行独立10秒cleanup。控制失效只取消/关连接，不在回调中Bind或执行cleanup；唯一Session任务待各子任务结束后清理，杜绝清理结束后重新绑定。Ready与失效竞态由取消关闭打断；即便Ready刚写出，失效已取消生命周期，不能服务后续请求。用闸门验证Bind和Ready前后的取消。
 5. Session只关闭自己拥有的response Body和绑定，不Close共享Gateway。Guest入口等待设备/HTTP任务。Read必须先交付n>0数据再处理错误；Flush错误显式检查。
 6. 原shell取消断言不充分，round-4仅作为双向传输/隔离初步证据，不宣称Close验证完成。新增可丢弃Go设备程序直接复用device.Conn，单一FD持有，Close并等待实际写goroutine；另测ReadDeadline，Host堵塞写deadline，最后关闭后再观测Host。所有旧失败保留。
