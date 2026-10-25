@@ -112,6 +112,7 @@ func runRealCLIHost(t *testing.T, mode string) {
 	}
 	reply := "HOST_REPLY_" + hex.EncodeToString(nonce[:])
 	var requests atomic.Int64
+	var backgroundRequests atomic.Int64
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !dialogue {
 			http.Error(w, "startup test does not model provider dialogue", http.StatusServiceUnavailable)
@@ -143,10 +144,14 @@ func runRealCLIHost(t *testing.T, mode string) {
 			http.Error(w, "invalid routing", 400)
 			return
 		}
-		turn := requests.Add(1)
-		if interactive {
-			t.Logf("推理请求%d: %s", turn, body)
+		// Claude 原生交互会额外请求标题和输入建议；它们不是用户对话回合。
+		if interactive && agent == "claude" && (bytes.Contains(body, []byte("Generate a concise, sentence-case title (3-7 words)")) || bytes.Contains(body, []byte("[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.]"))) {
+			backgroundRequests.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			writeCLIText(w, agent, `{"title":"Isolated test conversation"}`)
+			return
 		}
+		turn := requests.Add(1)
 		responseText := reply
 		if interactive {
 			responseText = fmt.Sprintf("%s_%d", reply, turn)
@@ -258,7 +263,7 @@ func runRealCLIHost(t *testing.T, mode string) {
 						return writeErr
 					}
 				}
-				if secondSent && (strings.Contains(visible, reply+"_2") || (agent == "claude" && requests.Load() == 2 && strings.Contains(output.String(), reply+"_2"))) {
+				if secondSent && strings.Contains(visible, reply+"_2") {
 					t.Logf("原生两轮终端响应=%s", visible)
 					return nil
 				}
@@ -303,7 +308,7 @@ func runRealCLIHost(t *testing.T, mode string) {
 	if dialogue && requests.Load() != expectedRequests {
 		t.Fatalf("实际推理请求数=%d，预期%d", requests.Load(), expectedRequests)
 	}
-	t.Logf("真实Host会话与回收通过，Host假TLS对话=%t；未验收真实供应商", dialogue)
+	t.Logf("真实Host会话与回收通过，Host假TLS对话=%t，后台请求=%d；未验收真实供应商", dialogue, backgroundRequests.Load())
 }
 
 // writeCLIText 按实际CLI协议发送Host随机无密钥SSE文本，不冒充真实模型服务。

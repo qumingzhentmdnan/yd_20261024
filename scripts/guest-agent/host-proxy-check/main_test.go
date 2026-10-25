@@ -22,6 +22,7 @@ func TestFinalTextRequiresStructuredSuccess(t *testing.T) {
 		{"codex-incomplete", "codex", `{"type":"item.completed","item":{"type":"agent_message","text":"upstream-random-value"}}`, ""},
 		{"codex-failed", "codex", "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"upstream-random-value\"}}\n{\"type\":\"turn.failed\"}", ""},
 		{"claude-success", "claude", `{"type":"result","subtype":"success","is_error":false,"result":"upstream-random-value"}`, "upstream-random-value"},
+		{"claude-missing-error-flag", "claude", `{"type":"result","subtype":"success","result":"upstream-random-value"}`, ""},
 		{"claude-error", "claude", `{"type":"result","subtype":"success","is_error":true,"result":"upstream-random-value"}`, ""},
 		{"claude-diagnostic", "claude", `{"type":"system","subtype":"success","result":"upstream-random-value"}`, ""},
 		{"claude-trailing", "claude", `{"type":"result","subtype":"success","result":"upstream-random-value"}{}`, ""},

@@ -62,7 +62,9 @@ Stage → Create/Start → Hello → Import → Gateway绑定与Ready → Prepar
 - Host配置边界、二进制输出、非零退出、实际转发后取消、下游背压、创建/启动部分失败清理测试及相关race/vet通过。
 - Host入口xapi只读评审发现两项生命周期清理遗漏，均已修复并在原session复审通过。
 - `internal/host/session/TestRealCLIHostStartup`须显式启用真实VM验证，检查实际CLI界面、完整Host启动编排、正常交互结束清理、基础盘不变；不把界面启动当作模型对话。
-- CLI完整Host Gateway请求、工具执行、多轮及最终整合仍在进行，未将上游假服务结果当作真实供应商验收。真实供应商、KVM与跨平台未验证。
+- 两种真实CLI的TCG启动、独立测试副本完整Host Gateway假TLS验收通过；工具执行见包实现记录。Codex正式Manifest/PTY两轮假TLS交互通过。
+- 七牛 `https://llmapi.qiniu.io` 的真实Responses请求与VM内Codex对话通过，明确选择 `gpt-6.1-sol`。随机算术题只在模型响应中出现正确结果；密钥从Host隐藏输入。验收后由Host终止并回收VM，不能将主动终止的退出码当作CLI正常退出。
+- 当前提供的七牛密钥列出的模型不含Claude，默认 `gpt-5.4` 也被该服务明确拒绝；不宣称其Claude供应商兼容性通过。KVM与跨平台未验证。
 
 评审session及运行日志保存在各worktree的`artifacts/review-sessions/`，不提交运行记录。主入口与已完成Prepare是不同任务，使用独立session并保留旧记录。
 
@@ -85,3 +87,13 @@ go test -race ./internal/host/session -run TestRealCLIHostGateway -v -count=1 -t
 Claude分别选择对应生产镜像、副本目录与`SAFEAGENT_CLI_AGENT=claude`。Host只给假TLS服务添加专用测试密钥；测试检查实际模型、路由、两种认证、Claude query与beta头、请求体不含Host密钥、Guest终端解析出的结构化最终结果精确匹配Host随机响应与实际零退出、VM销毁和基础盘不变。这证明实际CLI经过完整Host代理，仍不等于真实供应商验收；工具执行另见包实现记录。
 
 当前模型请求总上限为60秒（`proxywire.Total`），入口Gateway的空闲预算与其一致，允许该预算内的静默推理。响应等待不应复用完整物理帧的两秒预算；帧首字节到齐后的完整帧读取、设备写入和上传预算仍独立约束。超过60秒的单次推理会终止通道并回收VM；本版尚未提供动态请求预算。
+
+## 非默认模型
+
+内置Codex默认模型为 `gpt-5.4`，源站和密钥必须实际支持所选模型。对于七牛等提供其他模型的Responses服务，在用户确认导入的项目中创建 `.codex/config.toml`：
+
+```toml
+model = "gpt-6.1-sol"
+```
+
+将 `.codex/config.toml` 明确加入Host配置的 `files` 列表，并把 `origin` 设为用户批准的HTTPS源站。进入CLI后确认该隔离项目的信任提示；Codex读取项目模型配置，UI和请求均使用此模型。该配置不含Key，也不改变Host Gateway批准的目标源站。此旧版CLI未内置新模型元数据，会显示metadata警告；本次真实文本对话已验证，不能据此推断所有新模型特性均受支持。Claude模型通过内置清单选择，本次仅验证其固定Sonnet 4.6配置。

@@ -105,7 +105,7 @@ type claudeResult struct {
 	// Subtype 必须为success。
 	Subtype string `json:"subtype"`
 	// IsError 明确标记推理是否失败。
-	IsError bool `json:"is_error"`
+	IsError *bool `json:"is_error"`
 	// Result 保存最终助手正文，不包含诊断输出。
 	Result string `json:"result"`
 }
@@ -122,7 +122,7 @@ func finalText(agent string, output []byte) (string, error) {
 		if err := decoder.Decode(&extra); err != io.EOF {
 			return "", fmt.Errorf("Claude输出不止一个JSON结果")
 		}
-		if result.Type != "result" || result.Subtype != "success" || result.IsError || result.Result == "" {
+		if result.Type != "result" || result.Subtype != "success" || result.IsError == nil || *result.IsError || result.Result == "" {
 			return "", fmt.Errorf("Claude未返回成功助手结果")
 		}
 		return result.Result, nil
