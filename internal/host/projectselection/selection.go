@@ -36,8 +36,13 @@ func List(ctx context.Context, root string) ([]File, error) {
 		return nil, fmt.Errorf("项目路径不能包含符号链接")
 	}
 	top, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel")
-	if err != nil || filepath.Clean(strings.TrimSpace(string(top))) != filepath.Clean(root) {
-		return nil, fmt.Errorf("请选择 Git 仓库根目录")
+	if err != nil {
+		return nil, fmt.Errorf("请选择 Git 仓库中的目录")
+	}
+	repositoryRoot := filepath.Clean(strings.TrimSpace(string(top)))
+	relative, err := filepath.Rel(repositoryRoot, filepath.Clean(root))
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return nil, fmt.Errorf("项目目录必须位于 Git 仓库内")
 	}
 	tracked, err := gitOutput(ctx, root, "ls-files", "-z", "--cached")
 	if err != nil {

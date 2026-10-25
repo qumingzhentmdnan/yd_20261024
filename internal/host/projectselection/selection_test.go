@@ -64,3 +64,21 @@ func TestListAcceptsTrailingSlash(t *testing.T) {
 		t.Fatalf("带结尾分隔符的仓库路径应可读取: %v", err)
 	}
 }
+
+// TestListAcceptsRepositorySubdirectory 验证仓库内的项目子目录可以作为工作区。
+func TestListAcceptsRepositorySubdirectory(t *testing.T) {
+	root := t.TempDir()
+	git(t, root, "init", "-q")
+	subdir := filepath.Join(root, "service")
+	if err := os.Mkdir(subdir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "main.go"), []byte("package service"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "service/main.go")
+	files, err := List(context.Background(), subdir)
+	if err != nil || len(files) != 1 || files[0].Path != "main.go" {
+		t.Fatalf("仓库子目录读取失败: files=%+v err=%v", files, err)
+	}
+}
