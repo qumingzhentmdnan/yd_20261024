@@ -109,7 +109,7 @@ type Config struct {
 	MaxResponseBytes int64
 	// MaxHeaderBytes 限制输入请求头与上游响应头的字节预算。
 	MaxHeaderBytes int64
-	// TotalTimeout 限制整个请求及响应流的持续时间。
+	// TotalTimeout 限制整个请求及响应流的持续时间；零值表示仅使用空闲超时。
 	TotalTimeout time.Duration
 	// IdleTimeout 限制没有请求或响应字节进展的时间。
 	IdleTimeout time.Duration

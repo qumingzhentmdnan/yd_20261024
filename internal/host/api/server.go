@@ -32,7 +32,7 @@ type Request struct {
 	Key string `json:"key"`
 	// MCP 是用户确认的外部工具连接，凭据仅在Host内存。
 	MCP []MCP `json:"mcp,omitempty"`
-	// Model 是用户显式自定义模型，可为空使用镜像默认值。
+	// Model 是用户显式自定义模型，启动时为空则使用 gpt-6.1-sol。
 	Model string `json:"model"`
 }
 
@@ -86,6 +86,8 @@ type Server struct {
 	terminal Terminal
 	// output 保存最多 1MiB 待消费原始输出。
 	output []byte
+	// outputStart 是保留输出首字节在本次会话中的偏移，启动时归零。
+	outputStart int64
 	// state 是用户可见阶段。
 	state string
 	// stopReview 让交互回调结束并进入审核。
@@ -130,7 +132,7 @@ func (s *Server) Handler(page []byte, assets map[string][]byte) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
 		if "http://"+r.Host != s.origin {
 			http.Error(w, "拒绝访问", http.StatusForbidden)
 			return
@@ -141,7 +143,7 @@ func (s *Server) Handler(page []byte, assets map[string][]byte) http.Handler {
 			return
 		}
 		if data, ok := assets[r.URL.Path]; ok && r.Method == "GET" {
-			if r.URL.Path == "/assets/app.js" {
+			if strings.HasSuffix(r.URL.Path, ".js") {
 				w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			} else {
 				w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -236,6 +238,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "启动参数无效", 400)
 			return
 		}
+		if req.Model == "" {
+			req.Model = "gpt-6.1-sol"
+		}
 		candidates, err := projectselection.List(r.Context(), req.Project)
 		if err != nil {
 			http.Error(w, "项目不可用", 400)
@@ -265,6 +270,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.request = Request{Agent: req.Agent, Project: req.Project, Model: req.Model}
 		s.createdAt = time.Now()
 		s.output = nil
+		s.outputStart = 0
 		s.review = nil
 		s.apply = nil
 		s.stopReview = make(chan struct{})
@@ -275,7 +281,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	case "/api/poll":
 		s.mu.Lock()
-		result := map[string]any{"state": s.state, "output": s.output, "review": s.review}
+		result := map[string]any{"state": s.state, "output": append([]byte(nil), s.output...), "review": s.review, "outputStart": s.outputStart, "outputSession": s.createdAt}
 		if s.running {
 			result["sandboxes"] = []map[string]any{{"id": "current", "state": s.state, "agent": s.request.Agent, "project": s.request.Project, "model": s.request.Model, "createdAt": s.createdAt}}
 		} else {
@@ -333,7 +339,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	case "/api/review":
 		s.mu.Lock()
-		if s.terminal == nil {
+		if !s.running || s.terminal == nil && s.state != "cli-exited" {
 			s.mu.Unlock()
 			http.Error(w, "终端未就绪", 409)
 			return
@@ -394,12 +400,11 @@ func (s *Server) execute(ctx context.Context, req Request) {
 				n, err := term.Read(buf)
 				if n > 0 {
 					s.mu.Lock()
-					if len(s.output)+n > 1<<20 {
-						s.mu.Unlock()
-						done <- fmt.Errorf("终端输出未及时消费")
-						return
-					}
 					s.output = append(s.output, buf[:n]...)
+					if excess := len(s.output) - (1 << 20); excess > 0 {
+						s.output = append([]byte(nil), s.output[excess:]...)
+						s.outputStart += int64(excess)
+					}
 					s.mu.Unlock()
 				}
 				if err != nil {
@@ -419,7 +424,16 @@ func (s *Server) execute(ctx context.Context, req Request) {
 			return nil
 		case err := <-done:
 			if err == io.EOF {
-				return nil
+				s.mu.Lock()
+				s.terminal = nil
+				s.state = "cli-exited"
+				s.mu.Unlock()
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-stop:
+					return nil
+				}
 			}
 			return err
 		}

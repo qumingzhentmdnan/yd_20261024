@@ -87,6 +87,7 @@ func TestRealWebVMExport(t *testing.T) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	output := ""
+	var outputOffset int64
 	steps := map[string]bool{}
 	commandSent := false
 	enterSent := false
@@ -104,18 +105,27 @@ func TestRealWebVMExport(t *testing.T) {
 			State string `json:"state"`
 			// Output 是原始PTY输出。
 			Output []byte `json:"output"`
+			// OutputStart 是当前缓存首字节在会话中的偏移。
+			OutputStart int64 `json:"outputStart"`
 			// Review 是冻结的变更审核。
 			Review *api.Review `json:"review"`
 		}
 		apiCall("poll", struct{}{}, &poll)
-		output += string(poll.Output)
+		skip := max(int64(0), outputOffset-poll.OutputStart)
+		if skip < int64(len(poll.Output)) {
+			poll.Output = poll.Output[skip:]
+			output += string(poll.Output)
+			outputOffset = poll.OutputStart + skip + int64(len(poll.Output))
+		} else {
+			poll.Output = nil
+		}
 		if strings.Contains(output, "fake-web-host-only-key") {
 			t.Fatal("Host测试密钥泄露到终端")
 		}
 		if strings.HasPrefix(poll.State, "failed") {
 			t.Fatalf("VM会话失败，终端=%s", output)
 		}
-		if bytes.Contains(poll.Output, []byte("\x1b[6n")) {
+		if poll.State == "running" && bytes.Contains(poll.Output, []byte("\x1b[6n")) {
 			apiCall("input", map[string][]byte{"data": []byte("\x1b[1;1R")}, nil)
 		}
 		visible := strings.Join(strings.Fields(escape.ReplaceAllString(output, " ")), " ")

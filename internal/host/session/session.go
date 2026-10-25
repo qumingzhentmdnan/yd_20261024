@@ -50,7 +50,7 @@ type Config struct {
 	RetainVM bool
 }
 
-// Run 启动一次真实会话，交互回调结束后撤销代理并回收自有VM。
+// Run 启动一次真实会话，只有交互回调明确结束生命周期后才停止代理并处理VM。
 func Run(ctx context.Context, c Config, interact func(context.Context, guest.Client, protocol.SessionInfo) error) (result error) {
 	if err := protocol.Validate(c.Content); err != nil {
 		return err

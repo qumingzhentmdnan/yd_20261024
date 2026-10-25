@@ -23,7 +23,6 @@ import (
 	"safeagent/internal/host/vm/qemu"
 	"safeagent/internal/host/workspace"
 	"safeagent/internal/protocol"
-	"safeagent/internal/proxywire"
 	"safeagent/internal/workspacebundle"
 )
 
@@ -93,7 +92,7 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	modelGateway, err := gateway.New(gateway.Config{Services: services, MaxBindings: 1, MaxConcurrent: 1, MaxRequestBytes: 1 << 20, MaxResponseBytes: 16 << 20, MaxHeaderBytes: 16 << 10, TotalTimeout: proxywire.Total, IdleTimeout: proxywire.Total}, credentials, net.DefaultResolver)
+	modelGateway, err := gateway.New(gateway.Config{Services: services, MaxBindings: 1, MaxConcurrent: 1, MaxRequestBytes: 1 << 20, MaxResponseBytes: 16 << 20, MaxHeaderBytes: 16 << 10, TotalTimeout: 0, IdleTimeout: 5 * time.Minute}, credentials, net.DefaultResolver)
 	if err != nil {
 		return err
 	}

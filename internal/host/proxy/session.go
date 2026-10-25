@@ -185,10 +185,9 @@ func serve(ctx context.Context, c net.Conn, g *gateway.Gateway, identity gateway
 	}
 }
 
-// serveRequest 从接纳首帧开始限制总时间、帧间空闲及累计容量。
+// serveRequest 限制帧传输与累计容量，上游等待由Gateway空闲超时管理。
 func serveRequest(ctx context.Context, c net.Conn, g *gateway.Gateway, identity gateway.ChannelIdentity, binding gateway.BindingID, first proxywire.Frame) error {
-	total := time.Now().Add(proxywire.Total)
-	requestCtx, cancel := context.WithDeadline(ctx, total)
+	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var meta proxywire.RequestMeta
 	if err := proxywire.Decode(first.Payload, &meta); err != nil {
@@ -196,7 +195,7 @@ func serveRequest(ctx context.Context, c net.Conn, g *gateway.Gateway, identity 
 	}
 	var body bytes.Buffer
 	for {
-		f, err := proxywire.Read(c, proxywire.Deadline(total))
+		f, err := proxywire.Read(c, proxywire.Deadline(time.Time{}))
 		if err != nil {
 			return err
 		}
@@ -214,7 +213,11 @@ func serveRequest(ctx context.Context, c net.Conn, g *gateway.Gateway, identity 
 	response, err := g.Serve(requestCtx, identity, binding, gateway.ProxyRequest{ServiceRef: meta.Service, Method: meta.Method, Path: meta.Path, Headers: meta.Headers, Body: io.NopCloser(bytes.NewReader(body.Bytes()))})
 	if err != nil {
 		// 错误只暴露固定中止，不将内部错误或凭据文本送入Guest。
-		return errors.Join(err, proxywire.Write(c, proxywire.Frame{Kind: proxywire.Abort, ID: first.ID}, proxywire.Deadline(total)))
+		abortErr := proxywire.Write(c, proxywire.Frame{Kind: proxywire.Abort, ID: first.ID}, proxywire.Deadline(time.Time{}))
+		if errors.Is(err, gateway.ErrForbidden) || errors.Is(err, gateway.ErrRevoked) || errors.Is(err, gateway.ErrClosed) {
+			return errors.Join(err, abortErr)
+		}
+		return abortErr
 	}
 	defer response.Body.Close()
 	data, err := proxywire.Encode(proxywire.ResponseMeta{Status: response.Status, Headers: response.Headers})
@@ -222,7 +225,7 @@ func serveRequest(ctx context.Context, c net.Conn, g *gateway.Gateway, identity 
 		return err
 	}
 	write := func(kind byte, p []byte) error {
-		return proxywire.Write(c, proxywire.Frame{Kind: kind, ID: first.ID, Payload: p}, proxywire.Deadline(total))
+		return proxywire.Write(c, proxywire.Frame{Kind: kind, ID: first.ID, Payload: p}, proxywire.Deadline(time.Time{}))
 	}
 	if err = write(proxywire.Response, data); err != nil {
 		return err
@@ -239,7 +242,11 @@ func serveRequest(ctx context.Context, c net.Conn, g *gateway.Gateway, identity 
 			return write(proxywire.End, nil)
 		}
 		if readErr != nil {
-			return errors.Join(readErr, write(proxywire.Abort, nil))
+			abortErr := write(proxywire.Abort, nil)
+			if errors.Is(readErr, gateway.ErrForbidden) || errors.Is(readErr, gateway.ErrRevoked) || errors.Is(readErr, gateway.ErrClosed) {
+				return errors.Join(readErr, abortErr)
+			}
+			return abortErr
 		}
 	}
 }

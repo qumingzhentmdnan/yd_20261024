@@ -24,3 +24,4 @@
 .terminal-page{min-height:calc(100vh - 150px)}
 .terminal-page #terminal{height:calc(100vh - 280px);min-height:420px}
 @media(max-width:800px){.terminal-page #terminal{height:55vh;min-height:300px}}
+.terminal-page #terminal{background:#151b2a;padding:12px;border-radius:8px;overflow:hidden;min-width:0}.workspace-grid{display:flex;flex-direction:column}.terminal-page #terminal .xterm{height:100%}

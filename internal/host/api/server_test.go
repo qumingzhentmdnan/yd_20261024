@@ -1,9 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"runtime"
+	"safeagent/internal/protocol"
 	"strings"
 	"testing"
 )
@@ -138,5 +141,91 @@ func TestApplySerializesStop(t *testing.T) {
 	<-stopped
 	if response := request("apply", `{"id":"fixed"}`); response.Code != 409 {
 		t.Fatal("重复确认被接受")
+	}
+}
+
+// outputTerminal 提供确定性的PTY输出，验证缓存滚动不会终止会话。
+type outputTerminal struct {
+	// Reader 保存本次测试输出，读完后返回EOF。
+	*bytes.Reader
+}
+
+// Write 接受测试中未使用的PTY输入。
+func (t *outputTerminal) Write(p []byte) (int, error) { return len(p), nil }
+
+// Close 结束测试终端且不持有外部资源。
+func (t *outputTerminal) Close() error { return nil }
+
+// Resize 接受测试窗口尺寸。
+func (t *outputTerminal) Resize(context.Context, protocol.Dimension, protocol.Dimension) error {
+	return nil
+}
+
+// TestTerminalOutputWindow 验证超过缓存容量的输出不会结束为失败，且偏移和重复轮询内容一致。
+func TestTerminalOutputWindow(t *testing.T) {
+	data := bytes.Repeat([]byte("terminal-output"), 160000)
+	s, err := New("http://127.0.0.1:1234", func(ctx context.Context, req Request, interact func(Terminal) error, review func(Review, func(context.Context) error) error) error {
+		return interact(&outputTerminal{bytes.NewReader(data)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.running = true
+	s.done = make(chan struct{})
+	s.stopReview = make(chan struct{})
+	go s.execute(context.Background(), Request{})
+	for {
+		s.mu.Lock()
+		state := s.state
+		s.mu.Unlock()
+		if state == "cli-exited" {
+			close(s.stopReview)
+			break
+		}
+		runtime.Gosched()
+	}
+	<-s.done
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest("POST", "http://127.0.0.1:1234/api/poll", strings.NewReader("{}"))
+		r.Header.Set("Authorization", "Bearer "+s.token)
+		w := httptest.NewRecorder()
+		s.Handler(nil, nil).ServeHTTP(w, r)
+		var result struct {
+			// State 是会话执行结果。
+			State string `json:"state"`
+			// Output 是仍保留的原始输出字节。
+			Output []byte `json:"output"`
+			// Start 是缓存首字节在完整输出中的位置。
+			Start int64 `json:"outputStart"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.State != "finished" || result.Start != int64(len(data)-(1<<20)) || !bytes.Equal(result.Output, data[len(data)-(1<<20):]) {
+			t.Fatalf("state=%s start=%d bytes=%d", result.State, result.Start, len(result.Output))
+		}
+	}
+}
+
+// TestReviewAfterCLIExit 验证CLI退出后仍可通过停止并审核结束会话。
+func TestReviewAfterCLIExit(t *testing.T) {
+	s, err := New("http://127.0.0.1:1234", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.running = true
+	s.state = "cli-exited"
+	s.stopReview = make(chan struct{})
+	r := httptest.NewRequest("POST", "http://127.0.0.1:1234/api/review", strings.NewReader("{}"))
+	r.Header.Set("Authorization", "Bearer "+s.token)
+	w := httptest.NewRecorder()
+	s.Handler(nil, nil).ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	select {
+	case <-s.stopReview:
+	default:
+		t.Fatal("停止并审核未通知CLI退出会话")
 	}
 }

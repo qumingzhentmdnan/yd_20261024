@@ -46,7 +46,7 @@ type Gateway struct {
 
 // New 校验 Host 配置并创建 Gateway；Host 必须提供非 nil 的凭证存储和 Resolver。
 func New(config Config, credentials CredentialStore, resolver Resolver) (*Gateway, error) {
-	if config.MaxBindings <= 0 || config.MaxConcurrent <= 0 || config.MaxRequestBytes <= 0 || config.MaxRequestBytes == math.MaxInt64 || config.MaxResponseBytes <= 0 || config.MaxHeaderBytes <= 0 || config.TotalTimeout <= 0 || config.IdleTimeout <= 0 || len(config.Services) == 0 {
+	if config.MaxBindings <= 0 || config.MaxConcurrent <= 0 || config.MaxRequestBytes <= 0 || config.MaxRequestBytes == math.MaxInt64 || config.MaxResponseBytes <= 0 || config.MaxHeaderBytes <= 0 || config.TotalTimeout < 0 || config.IdleTimeout <= 0 || len(config.Services) == 0 {
 		return nil, ErrInvalidConfig
 	}
 	g := &Gateway{config: config, credentials: credentials, services: make(map[string]*service), bindings: make(map[BindingID]binding), current: make(map[string]BindingID), flows: make(map[*flow]struct{})}
@@ -300,7 +300,13 @@ type flow struct {
 
 // newFlow 在 Gateway 锁内创建生命周期，回调等待注册完成后才能释放配额。
 func newFlow(parent context.Context, gateway *Gateway, binding BindingID, input io.ReadCloser) *flow {
-	total, totalCancel := context.WithTimeout(parent, gateway.config.TotalTimeout)
+	var total context.Context
+	var totalCancel context.CancelFunc
+	if gateway.config.TotalTimeout > 0 {
+		total, totalCancel = context.WithTimeout(parent, gateway.config.TotalTimeout)
+	} else {
+		total, totalCancel = context.WithCancel(parent)
+	}
 	ctx, cancel := context.WithCancelCause(total)
 	f := &flow{gateway: gateway, binding: binding, ctx: ctx, cancel: cancel, totalCancel: totalCancel, input: input, lastProgress: time.Now(), done: make(chan struct{})}
 	f.mu.Lock()

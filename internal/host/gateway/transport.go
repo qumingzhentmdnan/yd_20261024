@@ -54,8 +54,8 @@ func newService(spec Service, config Config, resolver Resolver) (*service, error
 	transport := &http.Transport{
 		DisableKeepAlives:      true,
 		MaxResponseHeaderBytes: config.MaxHeaderBytes,
-		TLSHandshakeTimeout:    config.TotalTimeout,
-		ResponseHeaderTimeout:  config.TotalTimeout,
+		TLSHandshakeTimeout:    config.IdleTimeout,
+		ResponseHeaderTimeout:  config.IdleTimeout,
 		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: config.RootCAs},
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
@@ -83,7 +83,7 @@ func newService(spec Service, config Config, resolver Resolver) (*service, error
 			}
 			var dialErr error
 			for _, ip := range ips {
-				conn, err := (&net.Dialer{Timeout: config.TotalTimeout}).DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				conn, err := (&net.Dialer{Timeout: config.IdleTimeout}).DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 				if err == nil {
 					return conn, nil
 				}

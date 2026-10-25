@@ -103,8 +103,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rc := http.NewResponseController(w)
-	total := time.Now().Add(proxywire.Total)
-	ctx, cancel := context.WithDeadline(r.Context(), total)
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	callbackDone := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { defer close(callbackDone); rc.SetReadDeadline(time.Now()); rc.SetWriteDeadline(time.Now()) })
@@ -174,7 +173,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	write := func(kind byte, p []byte) error {
-		return proxywire.Write(b.conn, proxywire.Frame{Kind: kind, ID: id, Payload: p}, proxywire.Deadline(total))
+		return proxywire.Write(b.conn, proxywire.Frame{Kind: kind, ID: id, Payload: p}, proxywire.Deadline(time.Time{}))
 	}
 	if err = write(proxywire.Request, meta); err == nil {
 		for len(data) > 0 {
@@ -193,8 +192,12 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.Close()
 		panic(http.ErrAbortHandler)
 	}
-	// 模型可在请求总预算内静默思考；Read仍从首字节起限制完整物理帧为两秒。
-	f, err := proxywire.Read(b.conn, total)
+	// 模型等待由Host的空闲计时管理；完整物理帧仍受两秒预算约束。
+	f, err := proxywire.Read(b.conn, time.Time{})
+	if err == nil && f.ID == id && f.Kind == proxywire.Abort {
+		http.Error(w, "模型请求失败或等待超时，请重试", http.StatusBadGateway)
+		return
+	}
 	if err != nil || f.ID != id || f.Kind != proxywire.Response {
 		b.Close()
 		panic(http.ErrAbortHandler)
@@ -211,14 +214,14 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(response.Status)
 	for {
-		f, err = proxywire.Read(b.conn, total)
+		f, err = proxywire.Read(b.conn, time.Time{})
 		if err != nil || f.ID != id {
 			b.Close()
 			panic(http.ErrAbortHandler)
 		}
 		switch f.Kind {
 		case proxywire.Data:
-			if err = rc.SetWriteDeadline(proxywire.Deadline(total)); err == nil {
+			if err = rc.SetWriteDeadline(proxywire.Deadline(time.Time{})); err == nil {
 				_, err = w.Write(f.Payload)
 			}
 			if err == nil {
@@ -230,6 +233,9 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case proxywire.End:
 			return
+		case proxywire.Abort:
+			// Host已结束本请求，保留通道供后续重试；中断HTTP流防止误判完整响应。
+			panic(http.ErrAbortHandler)
 		default:
 			b.Close()
 			panic(http.ErrAbortHandler)

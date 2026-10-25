@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SafeAgent · 隔离开发工作台</title><link rel="stylesheet" href="/assets/style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SafeAgent · 隔离开发工作台</title><link rel="stylesheet" href="/assets/xterm.css"><link rel="stylesheet" href="/assets/style.css"></head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
@@ -13,7 +13,7 @@
     <section id="workspace" class="workspace-grid nav-view active-view">
       <div class="main-column">
         <section class="card setup-card"><div class="section-heading"><div><h2>新建隔离会话</h2><p>选择一个项目，Agent 将在独立 VM 中工作。</p></div><span class="step-badge">1 / 2</span></div>
-          <form id="setup"><div class="form-grid two"><label class="field"><span>选择 Agent</span><div class="select-wrap"><select id="agent"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></div></label><label class="field"><span>模型 <em>可选</em></span><input id="model" placeholder="默认模型" autocomplete="off"></label></div>
+          <form id="setup"><div class="form-grid two"><label class="field"><span>选择 Agent</span><div class="select-wrap"><select id="agent"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></div></label><label class="field"><span>模型 <em>可选</em></span><input id="model" value="gpt-6.1-sol" placeholder="gpt-6.1-sol" autocomplete="off"></label></div>
           <label class="field"><span>模型服务地址</span><input id="origin" type="url" placeholder="https://api.openai.com" required></label>
           <label class="field"><span>API Key <em>仅本次会话使用，不会进入 VM</em></span><input id="key" type="password" autocomplete="off" placeholder="sk-••••••••••••" required></label>
           <div class="project-row"><label class="field grow"><span>项目目录</span><input id="project" required placeholder="选择项目目录" readonly></label><button id="chooseProject" type="button" class="secondary browse">选择目录</button><button id="list" type="button" class="secondary browse">读取文件</button></div>
@@ -26,7 +26,7 @@
     </section>
     <section id="terminalView" class="card page-view nav-view terminal-page" hidden>
       <div class="section-heading"><div><h2>终端</h2><p id="terminalSub">会话启动后，Agent 将在这里运行。</p></div><div class="terminal-actions"><span class="status-dot" id="terminalDot"></span><span id="terminalState">未连接</span><button id="review" class="small-btn">停止并审核</button><button id="stop" class="small-btn">中止</button></div></div>
-      <pre id="terminal" tabindex="0" aria-label="VM终端"></pre><div class="terminal-hint">点击终端输入 · 支持方向键、Ctrl-C 和粘贴</div>
+      <div id="terminal" aria-label="VM终端"></div><div class="terminal-hint">点击终端输入 · 支持方向键、Ctrl-C 和粘贴</div>
     </section>
     <section id="connectionsView" class="card page-view nav-view" hidden>
       <div class="section-heading"><div><h2>连接与 MCP</h2><p>配置只读工具连接；令牌只在当前 Host 会话内存中使用。</p></div><button id="newMCP" class="primary">添加连接</button></div>
@@ -39,5 +39,5 @@
     <div id="statusToast" role="status" aria-live="polite"></div><div id="directoryDialog" class="dialog-backdrop" hidden><section class="dialog directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directoryTitle"><button id="closeDirectory" class="dialog-close" aria-label="关闭">×</button><h2 id="directoryTitle">选择项目目录</h2><div class="directory-path" id="directoryPath"></div><div id="directoryList" class="directory-list"></div><div class="dialog-actions"><button id="directoryUp" class="secondary">上一级</button><button id="selectDirectory" class="primary">选择当前目录</button></div></section></div>
   </main>
 </div>
-<script src="/assets/app.js"></script>
+<script src="/assets/xterm.js"></script><script src="/assets/addon-fit.js"></script><script src="/assets/app.js"></script>
 </body></html>
