@@ -66,7 +66,7 @@ func List(ctx context.Context, root string) ([]File, error) {
 	}
 	top, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return nil, fmt.Errorf("请选择 Git 仓库中的目录")
+		return listDirectoryFiles(root)
 	}
 	repositoryRoot := filepath.Clean(strings.TrimSpace(string(top)))
 	relative, err := filepath.Rel(repositoryRoot, canonical)
@@ -145,6 +145,52 @@ func List(ctx context.Context, root string) ([]File, error) {
 		}
 	}
 	return files, nil
+}
+
+// listDirectoryFiles 扫描非 Git 项目中的普通文件，供用户逐项确认导入。
+func listDirectoryFiles(root string) ([]File, error) {
+	files := make([]File, 0)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		warning := SensitivePath(relative)
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+		file.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if warning == "" {
+			if len(data) > 1<<20 {
+				warning = "文件超过1MiB，未扫描全部内容，默认不导入"
+			} else if strings.Contains(string(data), "PRIVATE KEY-----") || strings.Contains(string(data), "aws_secret_access_key") {
+				warning = "内容疑似包含密钥"
+			}
+		}
+		if len(files) >= 4096 {
+			return fmt.Errorf("项目候选超过4096文件，请缩小范围")
+		}
+		files = append(files, File{Path: filepath.ToSlash(relative), Selected: warning == "", Warning: warning})
+		return nil
+	})
+	return files, err
 }
 
 // normalizeWindowsPath 将 WSL 中用户常见的 Windows 盘符路径转换为挂载路径。

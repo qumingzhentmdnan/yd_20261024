@@ -99,3 +99,18 @@ func TestListAcceptsSymlinkedRepositoryPath(t *testing.T) {
 		t.Fatalf("链接仓库路径应可读取: %v", err)
 	}
 }
+
+// TestListAcceptsNonGitDirectory 验证普通目录也能列出可导入文件。
+func TestListAcceptsNonGitDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "src"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := List(context.Background(), root)
+	if err != nil || len(files) != 1 || files[0].Path != "src/main.go" || !files[0].Selected {
+		t.Fatalf("普通目录读取失败: files=%+v err=%v", files, err)
+	}
+}
