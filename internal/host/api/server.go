@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"safeagent/internal/host/projectselection"
@@ -102,6 +103,8 @@ type Server struct {
 	inputMu sync.Mutex
 	// cancel 取消当前 VM 并回收资源。
 	cancel context.CancelFunc
+	// github 是可选的 GitHub OAuth 登录服务。
+	github *githubAuth
 }
 
 // New 为本次本地监听地址创建随机认证上下文。
@@ -141,12 +144,21 @@ func (s *Server) Handler(page []byte, assets map[string][]byte) http.Handler {
 			w.Write(data)
 			return
 		}
+		// OAuth 回调来自 GitHub 重定向，不能携带本地 fragment 令牌；其余认证接口仍受本地令牌保护。
+		if r.URL.Path == "/api/auth/callback" {
+			s.githubAuthHandler(w, r)
+			return
+		}
 		if r.Header.Get("Origin") != "" && r.Header.Get("Origin") != s.origin {
 			http.Error(w, "拒绝跨源请求", 403)
 			return
 		}
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
 			http.Error(w, "需要本地会话认证", 401)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/auth/") {
+			s.githubAuthHandler(w, r)
 			return
 		}
 		if r.Method != "POST" {

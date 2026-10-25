@@ -77,6 +77,12 @@ func run() error {
 		return err
 	}
 	defer app.Close()
+	githubID, githubSecret, githubRedirect := os.Getenv("SAFEAGENT_GITHUB_CLIENT_ID"), os.Getenv("SAFEAGENT_GITHUB_CLIENT_SECRET"), os.Getenv("SAFEAGENT_GITHUB_REDIRECT_URL")
+	if githubID != "" || githubSecret != "" || githubRedirect != "" {
+		if err := app.ConfigureGitHub(api.GitHubConfig{ClientID: githubID, ClientSecret: githubSecret, RedirectURL: githubRedirect}); err != nil {
+			return err
+		}
+	}
 	page, err := frontend.Files.ReadFile("web/index.html")
 	if err != nil {
 		return err
