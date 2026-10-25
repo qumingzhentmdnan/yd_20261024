@@ -97,6 +97,34 @@ func stop(t *testing.T, f fixture) {
 // Run 验证公共接口的生命周期，不限定具体进程实现或终端设备。
 func Run(t *testing.T, factory Factory) {
 	t.Helper()
+	t.Run("PreparationSnapshotIsolation", func(t *testing.T) {
+		f := newFixture(t, factory)
+		ready(t, &f)
+		first, err := f.client.PrepareAgent(f.ctx, f.prepare)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first.PlanDigest == nil {
+			return
+		}
+		expected := *first.PlanDigest
+		*first.PlanDigest = f.prepare.ConfigDigest
+		state, err := f.client.GetState(f.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Prepared == nil || state.Prepared.PlanDigest == nil || *state.Prepared.PlanDigest != expected {
+			t.Fatal("准备返回值污染状态")
+		}
+		*state.Prepared.PlanDigest = f.prepare.ConfigDigest
+		replay, err := f.client.PrepareAgent(f.ctx, f.prepare)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if replay.PlanDigest == nil || *replay.PlanDigest != expected {
+			t.Fatal("状态返回值污染操作重放")
+		}
+	})
 	t.Run("HandshakeAndPreCancelledStart", func(t *testing.T) {
 		f := newFixture(t, factory)
 		_, err := f.client.GetState(f.ctx)

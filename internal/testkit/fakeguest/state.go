@@ -110,6 +110,7 @@ func New(config Config) (*Boot, error) {
 			return nil, err
 		}
 	}
+	config.Content = protocol.ClonePreparation(config.Content)
 	return &Boot{config: config, operations: map[protocol.UUID]*operation{}, sessions: map[protocol.OpaqueID]*session{}, faults: map[Point]Fault{}}, nil
 }
 

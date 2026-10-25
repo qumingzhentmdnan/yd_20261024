@@ -21,7 +21,10 @@ def main():
     parser.add_argument('--race', action='store_true')
     parser.add_argument('--proxy', action='store_true')
     parser.add_argument('--workspace', action='store_true')
+    parser.add_argument('--manifest', action='store_true')
     args = parser.parse_args()
+    if args.manifest and not args.workspace:
+        parser.error('--manifest requires --workspace for real imported project')
     args.output.mkdir(parents=True, exist_ok=False)
     root = args.output.resolve() / 'rootfs'
     shutil.copytree(args.assets.resolve() / 'rootfs', root, symlinks=True)
@@ -54,10 +57,28 @@ while :; do sleep 1; done
     fixed.mkdir(parents=True, exist_ok=True)
     (root / 'bin/fixed-workload').write_bytes(workload)
     (root / 'bin/fixed-workload').chmod(0o755)
-    for name, value in [('manifest', workload), ('config', config), ('workspace', workspace)]:
-        (fixed / name).write_bytes(value)
-    content = dict(preparedID='registered', manifestRef='fixed-v01', manifestDigest=digest(workload), configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
-    registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable='/bin/fixed-workload', directory='/home/agent', content=content)
+    if args.manifest:
+        config = b'manifest-prepare-v1\nhomeRoot=/home/agent\nworkspace=/workspace/project\nmodelGatewayURL=http://127.0.0.1:18080\n'
+        # 安装内置 probe，登记摘要与 Go manifest.Catalog 的 fingerprint 保持一致。
+        probe_dir = root / 'opt/agents/probe/bin'
+        probe_dir.mkdir(parents=True, exist_ok=True)
+        probe = repo / 'agents/probe/probe.sh'
+        shutil.copyfile(probe, probe_dir / 'probe')
+        (probe_dir / 'probe').chmod(0o755)
+        manifest_raw = (repo / 'agents/probe/agent.yaml').read_bytes()
+        template_raw = (repo / 'agents/probe/templates/settings.json').read_bytes()
+        record = {'Manifest': digest(manifest_raw), 'Executable': digest(probe.read_bytes()), 'Templates': {'templates/settings.json': digest(template_raw)}}
+        manifest_digest = digest(json.dumps(record, separators=(',', ':')).encode())
+        for name, value in [('manifest', manifest_raw), ('config', config), ('workspace', workspace)]:
+            (fixed / name).write_bytes(value)
+        content = dict(preparedID='registered', manifestRef='probe@1.0.0', manifestDigest=manifest_digest, configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
+        registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable='/opt/agents/probe/bin/probe', directory='/home/agent', content=content)
+    else:
+        for name, value in [('manifest', workload), ('config', config), ('workspace', workspace)]:
+            (fixed / name).write_bytes(value)
+        content = dict(preparedID='registered', manifestRef='fixed-v01', manifestDigest=digest(workload), configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
+        registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable='/bin/fixed-workload', directory='/home/agent', content=content)
+    registration['mode'] = 'manifest' if args.manifest else 'fixed'
     if args.workspace:
         (fixed / 'workspace-enabled').write_text('import-v01\n')
         (root / 'workspace').mkdir(exist_ok=True)
@@ -76,7 +97,8 @@ mkdir -p /dev/pts /run/safeagent
 mount -t devpts devpts /dev/pts
 chmod 700 /run/safeagent
 chmod 1777 /tmp
-chown 1000:1000 /home/agent
+chown 0:0 /home/agent
+chmod 755 /home/agent
 ip link set lo up
 for entry in /sys/class/virtio-ports/*; do
  name=$(cat "$entry/name")
@@ -88,6 +110,8 @@ done
 # 保留 boot 标记和工作负载状态，由 Host 回收 VM。
 while :; do sleep 60; done
 ''')
+    if not args.manifest:
+        (root / 'init').write_text((root / 'init').read_text().replace('chown 0:0 /home/agent', 'chown 1000:1000 /home/agent'))
     if args.proxy:
         init = (root / 'init').read_text()
         observer = ''.join('(while [ ! -f /tmp/http-' + name + '-result ]; do sleep 0.1; done; cat /tmp/http-' + name + '-result) &\n' for name in ('abort', 'stop'))
@@ -95,7 +119,7 @@ while :; do sleep 60; done
     (root / 'init').chmod(0o755)
     with (args.output / 'initramfs.cpio.gz').open('wb') as target:
         subprocess.run(['bash', '-o', 'pipefail', '-c', 'find . -print0 | cpio --null -o --format=newc --owner=0:0 2>/dev/null | gzip -1'], cwd=root, stdout=target, check=True)
-    (args.output / 'build.json').write_text(json.dumps(dict(race=args.race, command=command, initramfsDigest=digest((args.output / 'initramfs.cpio.gz').read_bytes())), indent=2) + '\n')
+    (args.output / 'build.json').write_text(json.dumps(dict(race=args.race, manifest=args.manifest, command=command, initramfsDigest=digest((args.output / 'initramfs.cpio.gz').read_bytes())), indent=2) + '\n')
 
 
 if __name__ == '__main__':

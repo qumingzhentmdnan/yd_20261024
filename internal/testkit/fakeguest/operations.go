@@ -266,7 +266,7 @@ func (c *Client) PrepareAgent(ctx context.Context, p protocol.PrepareAgentParams
 	if err != nil {
 		return protocol.Preparation{}, err
 	}
-	return v.(protocol.Preparation), nil
+	return protocol.ClonePreparation(v.(protocol.Preparation)), nil
 }
 
 // StartSession 去重创建虚拟工作负载，不执行任意命令。
@@ -291,7 +291,7 @@ func (c *Client) GetState(ctx context.Context) (protocol.GuestState, error) {
 	}
 	state := protocol.GuestState{Sessions: []protocol.SessionInfo{}}
 	if b.prepared != nil {
-		copy := *b.prepared
+		copy := protocol.ClonePreparation(*b.prepared)
 		state.Prepared = &copy
 	}
 	for _, s := range b.sessions {

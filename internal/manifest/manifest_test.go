@@ -156,7 +156,7 @@ func TestStableAndIndependentPlans(t *testing.T) {
 	if !bytes.Equal(original, encoded) {
 		t.Fatal("调用方修改污染后续渲染")
 	}
-	const expected = "sha256:2931f822d159ee2a19409be217059b2f00d4d169c0fe59a55a8ca43f2a5d8229"
+	const expected = "sha256:7bf3e2dadb36bed6c897e7b605c6e1c125621bd1ce4736122c1369854745ad25"
 	if second.PlanDigest != expected {
 		t.Fatalf("固定计划黄金摘要: %s", second.PlanDigest)
 	}

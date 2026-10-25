@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	opaquePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
-	vmPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	uuidPattern   = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	noncePattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	signalPattern = regexp.MustCompile(`^(|SIG[A-Z0-9]+(\+[0-9]+)?)$`)
+	opaquePattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+	vmPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	uuidPattern        = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	noncePattern       = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	digestPattern      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	manifestRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_@.\-]{0,127}$`)
+	signalPattern      = regexp.MustCompile(`^(|SIG[A-Z0-9]+(\+[0-9]+)?)$`)
 )
 
 const (
@@ -117,6 +118,13 @@ func validateValue(v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
+			// ManifestRef 允许完整版本引用，其他不透明标识仍使用原有格式。
+			if v.Type().Field(i).Name == "ManifestRef" {
+				if !manifestRefPattern.MatchString(v.Field(i).String()) {
+					return fmt.Errorf("%w: ManifestRef", Failure(CodeInvalidArgument))
+				}
+				continue
+			}
 			if err := validateValue(v.Field(i)); err != nil {
 				return fmt.Errorf("%s: %w", v.Type().Field(i).Name, err)
 			}

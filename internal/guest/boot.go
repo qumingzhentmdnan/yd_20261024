@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"safeagent/internal/guest/prepare"
+	"safeagent/internal/manifest"
 	"safeagent/internal/workspacewire"
 	"sort"
 	"sync"
@@ -28,6 +30,8 @@ type Config struct {
 	ImageDigest protocol.Digest
 	// Runner 是登记工作负载的固定执行配置。
 	Runner runner.Config
+	// Catalog 是镜像内置的可信清单目录。
+	Catalog *manifest.Catalog
 }
 
 // operation 保存接纳后不可更改的操作参数和最终结果。
@@ -86,6 +90,8 @@ type Boot struct {
 	operations map[protocol.UUID]*operation
 	// preparations 保存不可变准备记录。
 	preparations map[protocol.OpaqueID]protocol.Preparation
+	// executions 保存每个准备独立的执行配置，提交后不修改。
+	executions map[protocol.OpaqueID]runner.Config
 	// prepared 指向最近一次准备，空表示尚未准备。
 	prepared *protocol.Preparation
 	// sessions 保存全部历史 session。
@@ -100,6 +106,8 @@ type Boot struct {
 	ctx context.Context
 	// beforeCreate 是包内测试的提交前故障闸门，生产零值不安装。
 	beforeCreate func(context.Context) error
+	// installPreparation 是包内安装边界测试闸门，生产零值使用真实安装器。
+	installPreparation func(context.Context, manifest.Plan) error
 	// afterCreate 是包内测试的真实创建后登记前闸门，生产零值不安装。
 	afterCreate func()
 	// beforeExitCommit 是包内测试的退出结果提交闸门，生产零值不安装。
@@ -112,6 +120,9 @@ type Boot struct {
 
 // New 校验镜像登记值，不在请求时凭客户端摘要创造资源。
 func New(config Config) (*Boot, error) {
+	if config.Catalog != nil && string(config.Content.ConfigDigest) != prepare.ConfigDigest() {
+		return nil, protocol.Failure(protocol.CodeFailedPrecondition)
+	}
 	if err := protocol.Validate(config.Content); err != nil {
 		return nil, err
 	}
@@ -122,7 +133,8 @@ func New(config Config) (*Boot, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Boot{config: config, operations: make(map[protocol.UUID]*operation), preparations: make(map[protocol.OpaqueID]protocol.Preparation), sessions: make(map[protocol.OpaqueID]*session), ctx: ctx, cancel: cancel}, nil
+	config.Content = protocol.ClonePreparation(config.Content)
+	return &Boot{config: config, operations: make(map[protocol.UUID]*operation), preparations: make(map[protocol.OpaqueID]protocol.Preparation), executions: make(map[protocol.OpaqueID]runner.Config), sessions: make(map[protocol.OpaqueID]*session), ctx: ctx, cancel: cancel}, nil
 }
 
 // fixedError 在实际失败处将已接纳操作的错误固定为公共错误码。
@@ -202,8 +214,13 @@ func (c *connection) operate(ctx context.Context, method protocol.Method, input 
 	b.mu.Lock()
 	b.reserved = false
 	if err == nil && method == protocol.MethodPrepareAgent {
-		if err = ctx.Err(); err == nil {
-			prepared := value.(protocol.Preparation)
+		if b.config.Catalog == nil {
+			err = ctx.Err()
+		}
+		if err == nil {
+			result := value.(preparationResult)
+			prepared := result.content
+			b.executions[prepared.PreparedID] = result.runner
 			b.preparations[prepared.PreparedID] = prepared
 			b.prepared = &prepared
 		}
@@ -211,6 +228,9 @@ func (c *connection) operate(ctx context.Context, method protocol.Method, input 
 	if err != nil {
 		op.err = fixedError(err)
 	} else {
+		if method == protocol.MethodPrepareAgent {
+			value = value.(preparationResult).content
+		}
 		op.result = value
 	}
 	close(op.done)
@@ -219,6 +239,14 @@ func (c *connection) operate(ctx context.Context, method protocol.Method, input 
 		return nil, op.err
 	}
 	return value, nil
+}
+
+// preparationResult 保存尚待账本提交的实际准备与执行配置。
+type preparationResult struct {
+	// content 是发布成功后的准备描述。
+	content protocol.Preparation
+	// runner 仅属于本准备，不覆盖旧准备配置。
+	runner runner.Config
 }
 
 // executeOperation 执行已预留操作，准备结果由 operate 提交，启动结果由 start 提交。
@@ -232,6 +260,31 @@ func (b *Boot) executeOperation(ctx context.Context, input any) (any, error) {
 		return nil, err
 	}
 	prepared := b.config.Content
+	execution := b.config.Runner
+	if b.config.Catalog != nil {
+		definition, err := b.config.Catalog.Load(string(prepared.ManifestRef), string(prepared.ManifestDigest), manifest.Platform{OS: "linux", Architecture: "amd64"})
+		if err != nil {
+			return nil, err
+		}
+		plan, err := definition.Render(prepare.Values(string(id)))
+		if err != nil {
+			return nil, err
+		}
+		install := b.installPreparation
+		if install == nil {
+			install = func(ctx context.Context, plan manifest.Plan) error { return prepare.Install(ctx, plan, 1000, 1000) }
+		}
+		if err := install(ctx, plan); err != nil {
+			return nil, err
+		}
+		planDigest := protocol.Digest(plan.PlanDigest)
+		prepared.PlanDigest = &planDigest
+		execution = runner.Config{Path: plan.Executable, Args: plan.Args, Dir: plan.Directory, UID: 1000, GID: 1000}
+		for _, e := range plan.Environment {
+			execution.Environment = append(execution.Environment, e.Name+"="+e.Value)
+		}
+
+	}
 	prepared.PreparedID = protocol.OpaqueID(id)
 	if b.config.WorkspaceRoot != nil {
 		b.mu.Lock()
@@ -239,7 +292,7 @@ func (b *Boot) executeOperation(ctx context.Context, input any) (any, error) {
 		prepared.WorkspaceDigest = b.imported.WorkspaceDigest
 		b.mu.Unlock()
 	}
-	return prepared, nil
+	return preparationResult{content: prepared, runner: execution}, nil
 }
 
 // start 创建实际进程后立即登记，后续取消不回滚已经发生的启动。
@@ -252,7 +305,10 @@ func (b *Boot) start(ctx context.Context, p protocol.StartSessionParams) (protoc
 			return protocol.SessionInfo{}, err
 		}
 	}
-	config := b.config.Runner
+	config := b.executions[p.PreparedID]
+	if b.config.Catalog == nil {
+		config = b.config.Runner
+	}
 	if b.config.WorkspaceRoot != nil {
 		config.Dir = "/workspace/project"
 	}
@@ -331,7 +387,7 @@ func (c *connection) state() protocol.GuestState {
 	defer b.mu.Unlock()
 	state := protocol.GuestState{Sessions: []protocol.SessionInfo{}}
 	if b.prepared != nil {
-		copy := *b.prepared
+		copy := protocol.ClonePreparation(*b.prepared)
 		state.Prepared = &copy
 	}
 	for _, s := range b.sessions {

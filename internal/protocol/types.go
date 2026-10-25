@@ -151,6 +151,17 @@ type Preparation struct {
 	WorkspaceRef OpaqueID `json:"workspaceRef"`
 	// WorkspaceDigest 绑定工作区内容摘要。
 	WorkspaceDigest Digest `json:"workspaceDigest"`
+	// PlanDigest 绑定本次实际渲染并发布的完整运行计划；固定测试模式为空。
+	PlanDigest *Digest `json:"planDigest,omitempty"`
+}
+
+// ClonePreparation 复制可选计划摘要，隔离登记、历史操作与调用方快照。
+func ClonePreparation(value Preparation) Preparation {
+	if value.PlanDigest != nil {
+		digest := *value.PlanDigest
+		value.PlanDigest = &digest
+	}
+	return value
 }
 
 // GuestState 定义 GuestState 的精确负载字段。

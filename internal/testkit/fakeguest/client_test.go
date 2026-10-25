@@ -23,7 +23,8 @@ func uuid(n int) protocol.UUID {
 
 // config 显式提供测试身份、镜像摘要与已登记内容。
 func config() fakeguest.Config {
-	return fakeguest.Config{Instance: vm.VMInstance{Ref: vm.VMRef{ID: "guest-contract-vm"}, Epoch: "boot-1"}, GuestBuild: "fake-build", ImageDigest: protocol.Digest("sha256:" + strings.Repeat("d", 64)), Content: protocol.Preparation{PreparedID: "prepared-1", ManifestRef: "fixed-agent", ManifestDigest: protocol.Digest("sha256:" + strings.Repeat("a", 64)), ConfigDigest: protocol.Digest("sha256:" + strings.Repeat("b", 64)), WorkspaceRef: "workspace-1", WorkspaceDigest: protocol.Digest("sha256:" + strings.Repeat("c", 64))}}
+	digest := protocol.Digest("sha256:" + strings.Repeat("e", 64))
+	return fakeguest.Config{Instance: vm.VMInstance{Ref: vm.VMRef{ID: "guest-contract-vm"}, Epoch: "boot-1"}, GuestBuild: "fake-build", ImageDigest: protocol.Digest("sha256:" + strings.Repeat("d", 64)), Content: protocol.Preparation{PlanDigest: &digest, PreparedID: "prepared-1", ManifestRef: "fixed-agent", ManifestDigest: protocol.Digest("sha256:" + strings.Repeat("a", 64)), ConfigDigest: protocol.Digest("sha256:" + strings.Repeat("b", 64)), WorkspaceRef: "workspace-1", WorkspaceDigest: protocol.Digest("sha256:" + strings.Repeat("c", 64))}}
 }
 
 // setup 创建独立未握手连接及合法准备、启动参数。
@@ -379,5 +380,31 @@ func TestDisconnectBeforeCommit(t *testing.T) {
 	state, err := next.GetState(t.Context())
 	if err != nil || len(state.Sessions) != 0 {
 		t.Fatal(state, err)
+	}
+}
+
+// TestPreparationInputIsolation 验证构造参数的可选摘要不与内部登记共享。
+func TestPreparationInputIsolation(t *testing.T) {
+	cfg := config()
+	expected := *cfg.Content.PlanDigest
+	boot, err := fakeguest.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	*cfg.Content.PlanDigest = cfg.Content.ConfigDigest
+	client, err := boot.Connect(cfg.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Hello(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.PrepareAgent(t.Context(), protocol.PrepareAgentParams{OperationID: uuid(200), ManifestRef: cfg.Content.ManifestRef, ManifestDigest: cfg.Content.ManifestDigest, ConfigDigest: cfg.Content.ConfigDigest, WorkspaceRef: cfg.Content.WorkspaceRef, WorkspaceDigest: cfg.Content.WorkspaceDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PlanDigest == nil || *result.PlanDigest != expected {
+		t.Fatal("构造参数污染内部登记")
 	}
 }

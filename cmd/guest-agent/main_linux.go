@@ -22,11 +22,14 @@ import (
 	server "safeagent/internal/guest"
 	"safeagent/internal/guest/device"
 	"safeagent/internal/guest/runner"
+	"safeagent/internal/manifest"
 	"safeagent/internal/protocol"
 )
 
 // registration 是镜像构建时写入的固定内容清单，不接收 RPC 配置。
 type registration struct {
+	// Mode 区分固定验证程序与内置清单模式；空值为既有固定镜像。
+	Mode string `json:"mode"`
 	// Manifest 是 Manifest 的受控文件。
 	Manifest string `json:"manifest"`
 	// Configuration 是固定配置文件。
@@ -65,7 +68,7 @@ func load() (server.Config, error) {
 		path string
 		// expected 是构建时写入的内容摘要。
 		expected protocol.Digest
-	}{{entry.Manifest, entry.Content.ManifestDigest}, {entry.Configuration, entry.Content.ConfigDigest}, {entry.Workspace, entry.Content.WorkspaceDigest}}
+	}{{entry.Configuration, entry.Content.ConfigDigest}, {entry.Workspace, entry.Content.WorkspaceDigest}}
 	for _, check := range checks {
 		actual, err := hashFile(check.path)
 		if err != nil {
@@ -75,15 +78,33 @@ func load() (server.Config, error) {
 			return server.Config{}, fmt.Errorf("registered content digest mismatch")
 		}
 	}
-	// Manifest 是固定可执行文件的完整字节副本，避免未绑定任意执行路径。
-	executable, err := hashFile(entry.Executable)
+	config := server.Config{Content: entry.Content, Build: "guest-agent-v01", ImageDigest: entry.Content.ManifestDigest, Runner: runner.Config{Path: entry.Executable, Dir: entry.Directory, UID: 1000, GID: 1000}}
+	switch entry.Mode {
+	case "", "fixed":
+		for _, path := range []string{entry.Manifest, entry.Executable} {
+			actual, err := hashFile(path)
+			if err != nil {
+				return server.Config{}, err
+			}
+			if actual != entry.Content.ManifestDigest {
+				return server.Config{}, fmt.Errorf("registered fixed content digest mismatch")
+			}
+		}
+		return config, nil
+	case "manifest":
+	default:
+		return server.Config{}, fmt.Errorf("unknown registration mode %q", entry.Mode)
+	}
+	// 组合摘要由内置目录核验，不能与单份 YAML 的字节摘要比较。
+	catalog, err := manifest.NewCatalog()
 	if err != nil {
 		return server.Config{}, err
 	}
-	if executable != entry.Content.ManifestDigest {
-		return server.Config{}, fmt.Errorf("registered executable digest mismatch")
+	if _, err := catalog.Load(string(entry.Content.ManifestRef), string(entry.Content.ManifestDigest), manifest.Platform{OS: "linux", Architecture: "amd64"}); err != nil {
+		return server.Config{}, err
 	}
-	return server.Config{Content: entry.Content, Build: "guest-agent-v01", ImageDigest: entry.Content.ManifestDigest, Runner: runner.Config{Path: entry.Executable, Dir: entry.Directory, UID: 1000, GID: 1000}}, nil
+	config.Catalog = catalog
+	return config, nil
 }
 
 // acquireBoot 用 boot ID 和不可重入标记阻止同 boot 丢状态后静默服务。

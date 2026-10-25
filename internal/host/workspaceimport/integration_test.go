@@ -467,3 +467,106 @@ func TestQEMUWorkspaceProxy(t *testing.T) {
 	}
 	t.Log("真实Imported→Gateway Ready→Prepare→非root工作区与HTTP→退出通过")
 }
+
+// TestQEMUManifestPrepare 验证内置清单配置由真实 UID1000 在独立 HOME 读取。
+func TestQEMUManifestPrepare(t *testing.T) {
+	client, channels, content := realGuest(t)
+	if content.ManifestRef != "probe@1.0.0" {
+		t.Fatal("必须使用 --manifest 镜像")
+	}
+	store, base, _ := baseline(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	record, err := workspaceimport.Import(ctx, client, channels, store, base.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := preparation(content, base)
+	prepared, err := client.PrepareAgent(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.PlanDigest == nil {
+		t.Fatal("缺少真实计划摘要")
+	}
+	replay, err := client.PrepareAgent(ctx, params)
+	if err != nil || replay.PreparedID != prepared.PreparedID {
+		t.Fatal("准备重放不一致", err)
+	}
+	// 第二次准备不能替换旧准备绑定的 HOME 或执行配置。
+	secondParams := params
+	secondParams.OperationID, err = protocol.NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.PrepareAgent(ctx, secondParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.PreparedID == prepared.PreparedID {
+		t.Fatal("不同操作复用了准备标识")
+	}
+	conflict := params
+	conflict.WorkspaceRef = "different"
+	if _, err := client.PrepareAgent(ctx, conflict); err == nil {
+		t.Fatal("同操作不同参数未冲突")
+	} else {
+		var failure *protocol.Error
+		if !errors.As(err, &failure) || failure.Code != protocol.CodeConflict {
+			t.Fatal(err)
+		}
+	}
+	wrong := secondParams
+	wrong.OperationID, err = protocol.NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong.WorkspaceRef = "wrong"
+	if _, err := client.PrepareAgent(ctx, wrong); err == nil {
+		t.Fatal("错误工作区被接受")
+	} else {
+		var failure *protocol.Error
+		if !errors.As(err, &failure) || failure.Code != protocol.CodeFailedPrecondition {
+			t.Fatal(err)
+		}
+	}
+	id, err := protocol.NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.StartSession(ctx, protocol.StartSessionParams{OperationID: id, SessionID: "manifest", PreparedID: prepared.PreparedID, WorkspaceRef: record.WorkspaceRef, WorkspaceDigest: record.WorkspaceDigest, Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := client.AttachTerminal(ctx, session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminal.Close()
+	output := make(chan []byte, 1)
+	go func() {
+		var all []byte
+		buffer := make([]byte, 4096)
+		for {
+			n, e := terminal.Read(buffer)
+			all = append(all, buffer[:n]...)
+			if bytes.Contains(all, []byte("PROBE_DONE")) || e != nil {
+				output <- all
+				return
+			}
+		}
+	}()
+	select {
+	case actual := <-output:
+		for _, want := range []string{"PROBE_UID=1000", "PROBE_CWD=/workspace/project", "PROBE_HOME=/home/agent/" + string(prepared.PreparedID), "PROBE_JSON_BEGIN", "PROBE_TOML_BEGIN", "600 1000 1000", "http://127.0.0.1:18080", "PROBE_DONE"} {
+			if !bytes.Contains(actual, []byte(want)) {
+				t.Fatalf("缺少 %s: %s", want, actual)
+			}
+		}
+		t.Log(string(actual))
+	case <-ctx.Done():
+		terminal.Close()
+		<-output
+		t.Fatal(ctx.Err())
+	}
+}

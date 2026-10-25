@@ -30,6 +30,8 @@ type Config struct {
 	UID uint32
 	// GID 是非 root 主组。
 	GID uint32
+	// Environment 是经过清单校验的显式环境。
+	Environment []string
 }
 
 // Process 拥有 PTY、唯一子进程等待和停止协调。
@@ -94,7 +96,7 @@ func Start(c Config, id protocol.OpaqueID, rows, cols protocol.Dimension) (*Proc
 	}
 	cmd := exec.Command(c.Path, c.Args...)
 	cmd.Dir = c.Dir
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "TERM=xterm", "LANG=C"}
+	cmd.Env = append([]string{"PATH=/usr/bin:/bin", "TERM=xterm", "LANG=C"}, c.Environment...)
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
