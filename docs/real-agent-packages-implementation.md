@@ -1,6 +1,8 @@
+> 整合状态（2026-10-25）：两套正式CLI的生产PTY两轮、完整Host Gateway假TLS链路及七牛真实供应商对话均通过。Codex用Responses、Claude Code用Messages，均可在明确导入的项目设置中选择 `gpt-6.1-sol`；配置及限制见 [宿主入口](real-cli-host-implementation.md)。下文包分支的“未验收”仅为其整合前阶段记录，不能当作当前阻塞。
+
 # 真实 CLI 镜像实现与验收
 
-所属文件实现及分层验证已完成；完整 Claude 经 Host 代理的链路受共享 Gateway 查询路径/头透传阻塞，独立 codexx review 受只读环境阻塞，详见文末。
+所属文件实现及分层验证已完成；共享Gateway查询/头兼容问题已在整合中修复，两种CLI完整链路通过。包分支与主工作区codexx只读复审均已通过，早期环境限制不再是交付阻塞。
 
 工作目录 `/tmp/safeagent-realcli-agents`。变更仅涉及 `agents/**`、`internal/manifest/**`、`internal/guest/prepare/**`、`cmd/guest-agent/**`、`scripts/guest-agent/**` 以及本实现记录与对应设计。无 Git 暂存/提交，无共享 protocol/runner/gateway/proxy 或 go.mod 变更，无新增 Go 依赖。
 
@@ -11,7 +13,7 @@
 | Codex | 0.114.0 | gpt-5.4 | `847939c01c628eaad8a8754ac9eb365c03c55a24d5264a6f2deba8fc67c909b4` |
 | Claude Code | 2.1.81 | claude-sonnet-4-6 | `047e3f5591d6238b08dd9518729ac335b0e8df1c80fe985e5d7fbda2c18fc281` |
 
-来源、下载包摘要、Codex rg 摘要与运行依赖版本见 `agents/packages.lock.json`；官方配置依据与契约见 `design/real-agent-packages.md`。没有执行官方安装器、Manifest 安装命令、Host 上真实 CLI 或 Claude Agent，没有读取 Host 登录或真实凭据。下载仅在显式 artifacts 目录进行。
+来源、下载包摘要、Codex rg 摘要与运行依赖版本见 `agents/packages.lock.json`；官方配置依据与契约见 `design/real-agent-packages.md`。包分支构建阶段没有执行官方安装器、Manifest安装命令或Host上的真实CLI，没有读取Host登录信息。后续整合验收在VM运行两种真实CLI，由Host隐藏输入用户授权的真实凭据。下载仅在显式 artifacts 目录进行。
 
 ## 可复现构建
 
@@ -74,21 +76,21 @@ Claude 同样替换 image/output 为 final-claude/acceptance-claude。版本 smo
 
 该 localhost 假上游检查**未经过 Host Gateway**。生产启动测试另外验证真实 Host VM Manager/QEMU/Import/Prepare/Start/PTY/Stop/Wait，使用 `content.json` 选择对应 Manifest，并校验基础盘摘要未变；只报告真实界面启动。Host Bridge 使用既有 fixed HTTP 的真实 TCG 回归单独验证，不将这些分层检查拼称为真实供应商任务完成。
 
-fixed/probe 回归仍以原 `--workspace --proxy` 和 `--manifest --workspace` 构建，分别执行 `TestQEMUWorkspaceProxy` 与 `TestQEMUManifestPrepare`。最终执行状态与 review 阻塞记录如下。
+fixed/probe 回归仍以原 `--workspace --proxy` 和 `--manifest --workspace` 构建，分别执行 `TestQEMUWorkspaceProxy` 与 `TestQEMUManifestPrepare`。包分支执行证据如下，整合最终状态以本文顶部及宿主入口文档为准。
 
-## 剩余验证边界
+## 包分支阶段验证边界
 
-未使用真实 key，未访问真实供应商；没有真实供应商任务、KVM 或跨平台验证。未提供 git、完整语言工具链或全部 CLI 可选功能依赖。首次交互启动保留各 CLI 原生的目录信任/主题引导，Host 终端负责正常转发用户输入。禁止将欢迎界面或 localhost 假上游成功表述为外部供应商兼容性已完全验收。
-
-
-## 向主 Agent 报告的 Host Gateway 依赖
-
-固定 Claude Code 2.1.81 已实测发送 `POST /v1/messages?beta=true`，`Anthropic-Version: 2023-06-01`，`Anthropic-Beta: claude-code-20250219,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24`。证据在 `artifacts/final-smoke-claude-routing/console.log`。当前 `internal/host/gateway/transport.go` 的 `validPath` 禁止查询参数、路由按整个 Path 精确匹配；`gateway.go` 只保留 Content-Type/Accept/Anthropic-Version，丢弃 Anthropic-Beta。因此当前完整 Claude→Guest Bridge→Host Gateway 链路尚未验收可用；不能把本地假上游结果当作经 Host 代理成功。
-
-需由共享 Gateway 所有者明确实现受限的路径/查询处理并保留合法的 Anthropic-Beta（继续剥离 Guest 认证、由 Host 注入真实认证），以及配置 `/v1/messages`、可选 `/v1/messages/count_tokens`；Codex配置 `/v1/responses`。不能在 Guest 伪造新协议、去掉必要 beta 头或私改共享代码。该要求与 [Claude 官方 Gateway 兼容说明](https://code.claude.com/docs/en/llm-gateway-protocol) 一致。Header 值不能只硬编码为本次观察到的集合，后续版本需按受控策略审核。当前生产 CLI 的配置输入不需要修改 Prepare 协议。
+包分支阶段仅使用假服务；后续主工作区已完成两种CLI的七牛真实供应商对话。KVM及跨平台仍未验证。未提供 git、完整语言工具链或全部 CLI 可选功能依赖。首次交互启动保留各 CLI 原生的目录信任/主题引导，Host 终端负责正常转发用户输入。禁止将欢迎界面或 localhost 假上游成功表述为外部供应商兼容性已完全验收。
 
 
-## 最终验收记录
+## 整合前向主 Agent 报告的 Host Gateway 依赖
+
+固定 Claude Code 2.1.81 已实测发送 `POST /v1/messages?beta=true`，`Anthropic-Version: 2023-06-01`，`Anthropic-Beta: claude-code-20250219,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24`。证据在 `artifacts/final-smoke-claude-routing/console.log`。整合后的Gateway已明确支持 `/v1/messages` 和精确的 `/v1/messages?beta=true`，受控透传Anthropic-Beta/Version并由Host注入认证；Codex使用 `/v1/responses`。两种实际CLI经完整Host链路的假TLS及七牛真实验证均通过，不再存在此兼容阻塞。
+
+当前仅开放实际消费者所需路由，没有加入未观察到的count_tokens或任意查询。配置输入沿用既有Prepare协议，不在Guest伪造新协议。
+
+
+## 包分支验收记录
 
 工具版本：Go 1.27.3 linux/amd64、QEMU 8.2.2（Ubuntu 1:8.2.2+ds-0ubuntu1.18）、Python 3.12.3、dpkg-deb 1.22.6。构建使用显式现有素材，运行库使用锁文件中独立校验的官方包。镜像 cpio 包含实际构建时间与素材元数据，命令可复现，未宣称镜像逐字节可复现。
 
@@ -105,8 +107,8 @@ fixed/probe 回归仍以原 `--workspace --proxy` 和 `--manifest --workspace` �
 | probe Manifest/Prepare 真实回归 | 通过，`artifacts/regression-probe/test.log`，`TestQEMUManifestPrepare` |
 | 篡改包/BusyBox保护手工检查 | 篡改包在写入 rootfs 前被明确拒绝；两套镜像 BusyBox 字节与只读素材一致 |
 | KVM / 跨平台 | 未运行 |
-| 真供应商任务 | 未运行，无真实 key |
-| CLI 完整经 Host Gateway 任务 | 未验收；Claude 已有确定的共享 Gateway 兼容阻塞，不能报告完成 |
+| 真供应商任务 | 整合后两种CLI均经七牛gpt-6.1-sol真实VM对话通过，配置及限制见宿主入口文档 |
+| CLI 完整经 Host Gateway 任务 | 整合后真实TCG生产PTY两轮、独立副本假TLS及七牛对话均通过 |
 
 所有最终生产生命周期测试核对基础盘 SHA256 为 `4e16706e345f0bacbae79893a423ef6c8c1b522f6f078caceaee30f8b07216fc` 且未变化，各次使用独立 VM/overlay/socket，并停止等待销毁。
 

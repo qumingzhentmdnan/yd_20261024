@@ -62,9 +62,9 @@ Stage → Create/Start → Hello → Import → Gateway绑定与Ready → Prepar
 - Host配置边界、二进制输出、非零退出、实际转发后取消、下游背压、创建/启动部分失败清理测试及相关race/vet通过。
 - Host入口xapi只读评审发现两项生命周期清理遗漏，均已修复并在原session复审通过。
 - `internal/host/session/TestRealCLIHostStartup`须显式启用真实VM验证，检查实际CLI界面、完整Host启动编排、正常交互结束清理、基础盘不变；不把界面启动当作模型对话。
-- 两种真实CLI的TCG启动、独立测试副本完整Host Gateway假TLS验收通过；工具执行见包实现记录。Codex正式Manifest/PTY两轮假TLS交互通过。
+- 两种真实CLI的TCG启动、独立测试副本完整Host Gateway假TLS验收通过；工具执行见包实现记录。Codex和Claude正式Manifest/PTY两轮假TLS交互均通过，Claude标题与输入建议请求单独响应，不冒充用户回合。
 - 七牛 `https://llmapi.qiniu.io` 的真实Responses请求与VM内Codex对话通过，明确选择 `gpt-6.1-sol`。随机算术题只在模型响应中出现正确结果；密钥从Host隐藏输入。验收后由Host终止并回收VM，不能将主动终止的退出码当作CLI正常退出。
-- 当前提供的七牛密钥列出的模型不含Claude，默认 `gpt-5.4` 也被该服务明确拒绝；不宣称其Claude供应商兼容性通过。KVM与跨平台未验证。
+- Claude Code在同一七牛端点使用自定义 `gpt-6.1-sol` 的Messages接口完成真实VM对话。两种CLI均无需使用供应商同名模型；源站须支持相应协议。默认 `gpt-5.4` 被本次密钥明确拒绝，不自动替换模型。KVM与跨平台未验证。
 
 评审session及运行日志保存在各worktree的`artifacts/review-sessions/`，不提交运行记录。主入口与已完成Prepare是不同任务，使用独立session并保留旧记录。
 
@@ -96,4 +96,18 @@ Claude分别选择对应生产镜像、副本目录与`SAFEAGENT_CLI_AGENT=claud
 model = "gpt-6.1-sol"
 ```
 
-将 `.codex/config.toml` 明确加入Host配置的 `files` 列表，并把 `origin` 设为用户批准的HTTPS源站。进入CLI后确认该隔离项目的信任提示；Codex读取项目模型配置，UI和请求均使用此模型。该配置不含Key，也不改变Host Gateway批准的目标源站。此旧版CLI未内置新模型元数据，会显示metadata警告；本次真实文本对话已验证，不能据此推断所有新模型特性均受支持。Claude模型通过内置清单选择，本次仅验证其固定Sonnet 4.6配置。
+将 `.codex/config.toml` 明确加入Host配置的 `files` 列表，并把 `origin` 设为用户批准的HTTPS源站。进入CLI后确认该隔离项目的信任提示；Codex读取项目模型配置，UI和请求均使用此模型。该配置不含Key，也不改变Host Gateway批准的目标源站。此旧版CLI未内置新模型元数据，会显示metadata警告；本次真实文本对话已验证，不能据此推断所有新模型特性均受支持。Claude默认模型为Sonnet 4.6，也可通过明确导入的项目配置选择其他支持Messages协议的模型。
+
+Claude Code可在项目 `.claude/settings.json` 中显式覆盖非密钥模型变量：
+
+```json
+{
+  "model": "gpt-6.1-sol",
+  "env": {
+    "ANTHROPIC_MODEL": "gpt-6.1-sol",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6.1-sol"
+  }
+}
+```
+
+将该文件明确加入Host的 `files` 列表，`agent`选择 `claude`，使用Claude镜像并设置相同七牛 `origin`。两项环境变量覆盖内置默认模型及标题等辅助请求的模型；它们只包含模型名称。首次主题、安全说明和项目信任仍由用户确认。实际UI显示 `gpt-6.1-sol`，真实Messages响应正确返回随机算术题结果。不要在项目设置中填写真实Key。

@@ -1,3 +1,5 @@
+> 最终整合状态（2026-10-25）：本文保留各轮实施过程。原session的round4及主工作区整合复审均通过；新增回归普通/race/vet通过。真实TCG生产PTY两轮及独立副本Host假TLS链路、两种CLI经七牛自定义gpt-6.1-sol真实对话均通过，详见 [宿主入口](real-cli-host-implementation.md)。KVM、跨平台和任意供应商兼容性未据此验收。
+
 # 真实 CLI 传输实施记录
 
 2026-10-25：已实现长会话控制账本、proxy.Run 正常取消及已捕获固定CLI的必要HTTP兼容。导出profile可供Host入口接入，完整VM/CLI集成由主Agent验证。设计见 design/real-cli-transport.md，实时交接见 artifacts/implementation-session/status.md。
