@@ -82,3 +82,20 @@ func TestListAcceptsRepositorySubdirectory(t *testing.T) {
 		t.Fatalf("仓库子目录读取失败: files=%+v err=%v", files, err)
 	}
 }
+
+// TestListAcceptsSymlinkedRepositoryPath 验证常见的链接工作区路径不会被拒绝。
+func TestListAcceptsSymlinkedRepositoryPath(t *testing.T) {
+	root := t.TempDir()
+	git(t, root, "init", "-q")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("readme"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "README.md")
+	link := filepath.Join(t.TempDir(), "project-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := List(context.Background(), link); err != nil {
+		t.Fatalf("链接仓库路径应可读取: %v", err)
+	}
+}

@@ -32,15 +32,12 @@ func List(ctx context.Context, root string) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if canonical != filepath.Clean(root) {
-		return nil, fmt.Errorf("项目路径不能包含符号链接")
-	}
 	top, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("请选择 Git 仓库中的目录")
 	}
 	repositoryRoot := filepath.Clean(strings.TrimSpace(string(top)))
-	relative, err := filepath.Rel(repositoryRoot, filepath.Clean(root))
+	relative, err := filepath.Rel(repositoryRoot, canonical)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
 		return nil, fmt.Errorf("项目目录必须位于 Git 仓库内")
 	}
@@ -73,7 +70,7 @@ func List(ctx context.Context, root string) ([]File, error) {
 				}
 				return nil, err
 			}
-			if resolved != full {
+			if resolved != filepath.Join(canonical, path) {
 				continue
 			}
 
