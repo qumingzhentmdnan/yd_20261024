@@ -22,9 +22,11 @@
           <div class="form-foot"><p class="privacy"><span>▣</span> 密钥保留在本机内存，VM 无网络与共享目录。</p><button type="submit" class="primary start"><span>▶</span>启动隔离会话</button></div></form></section>
         <section id="reviewBox" class="card review-card" hidden><div class="section-heading"><div><h2>审核变更</h2><p>确认后才会将变更写回宿主项目。</p></div><span class="review-lock">冻结快照</span></div><pre id="diff"></pre><div class="review-actions"><button id="retain" class="secondary">保留副本并结束</button><button id="apply" class="primary">确认并回写项目</button></div></section>
       </div>
-      <aside class="terminal-sidebar">        <section class="card terminal-card"><div class="section-heading"><div><h2>终端</h2><p id="terminalSub">会话启动后，Agent 将在这里运行。</p></div><div class="terminal-actions"><span class="status-dot" id="terminalDot"></span><span id="terminalState">未连接</span><button id="review" class="small-btn">停止并审核</button><button id="stop" class="small-btn">中止</button></div></div><pre id="terminal" tabindex="0" aria-label="VM终端"></pre><div class="terminal-hint">点击终端输入 · 支持方向键、Ctrl-C 和粘贴</div></section>
-</aside>
       <section class="card sandboxes-card"><div class="section-heading"><div><h2>当前活跃沙箱</h2><p>正在运行的隔离 VM 会显示在这里。</p></div><span class="live-label"><i></i>实时</span></div><div id="sandboxList" class="sandbox-list"><div class="empty-panel"><strong>当前没有活跃沙箱</strong><p>启动隔离会话后，状态和项目会显示在这里。</p></div></div></section>
+    </section>
+    <section id="terminalView" class="card page-view nav-view terminal-page" hidden>
+      <div class="section-heading"><div><h2>终端</h2><p id="terminalSub">会话启动后，Agent 将在这里运行。</p></div><div class="terminal-actions"><span class="status-dot" id="terminalDot"></span><span id="terminalState">未连接</span><button id="review" class="small-btn">停止并审核</button><button id="stop" class="small-btn">中止</button></div></div>
+      <pre id="terminal" tabindex="0" aria-label="VM终端"></pre><div class="terminal-hint">点击终端输入 · 支持方向键、Ctrl-C 和粘贴</div>
     </section>
     <section id="connectionsView" class="card page-view nav-view" hidden>
       <div class="section-heading"><div><h2>连接与 MCP</h2><p>配置只读工具连接；令牌只在当前 Host 会话内存中使用。</p></div><button id="newMCP" class="primary">添加连接</button></div>
