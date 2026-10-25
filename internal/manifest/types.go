@@ -43,7 +43,7 @@ type Descriptor struct {
 	ManifestDigest string
 	// Platforms 保存清单声明且本模块支持的平台。
 	Platforms []Platform
-	// ModelProtocol 描述声明的模型协议，本轮为 test-http。
+	// ModelProtocol 描述清单声明的模型协议，由固定包登记约束。
 	ModelProtocol string
 }
 

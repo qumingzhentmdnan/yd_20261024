@@ -18,7 +18,7 @@ import (
 
 // testRegistration 固定测试期望的包白名单，不改变生产登记。
 func testRegistration() registration {
-	return registration{ref: "probe@1.0.0", directory: "probe", packageRef: "probe-builtin-v1", executable: "/opt/agents/probe/bin/probe", executableAsset: "probe.sh", environment: []string{"HOME", "PATH", "PROBE_CONFIG", "SAFEAGENT_PROXY_KEY"}}
+	return registration{ref: "probe@1.0.0", directory: "probe", packageRef: "probe-builtin-v1", executable: "/opt/agents/probe/bin/probe", executableAsset: "probe.sh", modelProtocol: "test-http", environment: []string{"HOME", "PATH", "PROBE_CONFIG", "SAFEAGENT_PROXY_KEY"}}
 }
 
 // testAssets 将真实内置字节复制为包内坏样例的独立输入。

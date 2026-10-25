@@ -43,7 +43,7 @@ type connection struct {
 	epoch protocol.Epoch
 	// last 是最大已接收请求号。
 	last protocol.Sequence
-	// count 是实际接收请求数，与 requestID 数值独立。
+	// count 是非 GetState 历史请求数，与 requestID 数值独立。
 	count uint32
 	// eventID 是已分配事件号。
 	eventID protocol.Sequence
@@ -221,7 +221,9 @@ func (c *connection) run() error {
 			return protocol.ErrFrame
 		}
 		c.last = r.RequestID
-		c.count++
+		if r.Method != protocol.MethodGetState {
+			c.count++
+		}
 		hello := c.hello
 		stale := hello && (r.Epoch != c.epoch || r.ConnectionID != c.id)
 		c.mu.Unlock()
@@ -267,7 +269,7 @@ func (c *connection) run() error {
 		}
 		ctx, cancel := context.WithTimeout(c.ctx, time.Duration(r.TimeoutMs)*time.Millisecond)
 		c.mu.Lock()
-		if len(c.pending) >= 16 {
+		if len(c.pending) >= protocol.MaxPending {
 			c.mu.Unlock()
 			cancel()
 			if err = c.response(r, nil, protocol.Failure(protocol.CodeResourceExhausted), nil); err != nil {

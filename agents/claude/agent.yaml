@@ -1,0 +1,36 @@
+apiVersion: safeagent.io/v1
+kind: AgentManifest
+metadata:
+  id: claude
+  version: 2.1.81
+  displayName: claude CLI 2.1.81
+  support:
+    os: linux
+    architectures: [amd64]
+    modes: [pty]
+  provenance:
+    source: builtin
+    packageRef: claude-linux-x64-2.1.81
+runtime:
+  executable: /opt/agents/claude/bin/claude
+  args: ["--settings", "${home}/.claude/settings.json"]
+  cwd: "${workspace}"
+  terminal: pty
+  user: agent
+  environment:
+    HOME: "${home}"
+    PATH: /usr/bin:/bin
+    ANTHROPIC_BASE_URL: "${modelGatewayURL}"
+    ANTHROPIC_AUTH_TOKEN: "proxy-managed"
+    ANTHROPIC_MODEL: "claude-sonnet-4-6"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-sonnet-4-6"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    DISABLE_AUTOUPDATER: "1"
+    TERM: "xterm-256color"
+files:
+  - destination: "${home}/.claude/settings.json"
+    template: templates/settings.json
+    format: json
+capabilities:
+  model:
+    protocol: anthropic-messages

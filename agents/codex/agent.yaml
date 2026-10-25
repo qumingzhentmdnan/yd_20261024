@@ -1,0 +1,32 @@
+apiVersion: safeagent.io/v1
+kind: AgentManifest
+metadata:
+  id: codex
+  version: 0.114.0
+  displayName: codex CLI 0.114.0
+  support:
+    os: linux
+    architectures: [amd64]
+    modes: [pty]
+  provenance:
+    source: builtin
+    packageRef: codex-linux-x64-0.114.0
+runtime:
+  executable: /opt/agents/codex/bin/codex
+  args: ["--no-alt-screen"]
+  cwd: "${workspace}"
+  terminal: pty
+  user: agent
+  environment:
+    HOME: "${home}"
+    PATH: /usr/bin:/bin
+    CODEX_HOME: "${home}/.codex"
+    SAFEAGENT_PROXY_KEY: "proxy-managed"
+    TERM: "xterm-256color"
+files:
+  - destination: "${home}/.codex/config.toml"
+    template: templates/codex-config.toml.tmpl
+    format: toml
+capabilities:
+  model:
+    protocol: openai-responses

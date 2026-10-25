@@ -11,28 +11,54 @@ import (
 	"time"
 
 	"safeagent/internal/host/gateway"
+	"safeagent/internal/host/guest"
 	"safeagent/internal/host/guest/rpc"
+	"safeagent/internal/host/vm"
 	"safeagent/internal/host/vm/qemu"
 	"safeagent/internal/proxywire"
 )
 
-// Run 拥有本次绑定和通道，ready须立即通知返回；失效后用独立context回收VM，不关闭共享Gateway。
+// Run 拥有绑定及VM清理；调用方主动取消只剔除传输关闭错误，超时、协议及清理失败仍返回，不关闭共享Gateway。
 func Run(ctx context.Context, client *rpc.Client, channels *qemu.Channels, g *gateway.Gateway, spec gateway.BindingSpec, ready func(), cleanup func(context.Context) error) (result error) {
+	return run(ctx, client, func(ctx context.Context, instance vm.VMInstance) (net.Conn, error) {
+		if instance != channels.Instance {
+			return nil, gateway.ErrForbidden
+		}
+		return channels.OpenProxy(ctx)
+	}, g, spec, ready, cleanup)
+}
+
+// run 统一拥有可信端口装配、探测及清理，等待子任务退出后合并真实失败原因。
+func run(ctx context.Context, client *rpc.Client, open func(context.Context, vm.VMInstance) (net.Conn, error), g *gateway.Gateway, spec gateway.BindingSpec, ready func(), cleanup func(context.Context) error) (result error) {
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var probeErr error
 	// 唯一装配任务串行启动与清理，回调只发布取消，不能重入绑定。
 	defer func() {
+		// 探测任务已由内层defer等待退出；先取首次原因，不能把本地主动Close当作真实断线。
+		controlErr := client.Failure()
 		client.Close()
+		if controlErr == nil {
+			// 读循环可能在快照与Close之间先固定协议错误；Close等待它退出后必须再次读取。
+			controlErr = client.Failure()
+			if controlErr == guest.ErrDisconnected {
+				controlErr = nil
+			}
+		}
+		parentErr := ctx.Err()
+		if parentErr == context.Canceled {
+			parentErr = nil
+			controlErr = withoutRunErrors(controlErr, context.Canceled)
+			// Probe的断线包装由controlErr中的首次原因说明，不能把正常取消包装成真实故障。
+			probeErr = withoutRunErrors(probeErr, context.Canceled, guest.ErrDisconnected)
+		}
 		clean, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
-		result = errors.Join(result, cleanup(clean))
+		result = errors.Join(runError(ctx, result), parentErr, controlErr, probeErr, cleanup(clean))
 	}()
 	instance, id, err := client.Identity()
 	if err != nil {
 		return err
-	}
-	if instance != channels.Instance {
-		return gateway.ErrForbidden
 	}
 	stopped := make(chan struct{})
 	stopControl := context.AfterFunc(controlContext{client.Done()}, func() { defer close(stopped); cancel() })
@@ -41,7 +67,7 @@ func Run(ctx context.Context, client *rpc.Client, channels *qemu.Channels, g *ga
 			<-stopped
 		}
 	}()
-	port, err := channels.OpenProxy(life)
+	port, err := open(life, instance)
 	if err != nil {
 		return err
 	}
@@ -79,6 +105,7 @@ func Run(ctx context.Context, client *rpc.Client, channels *qemu.Channels, g *ga
 				err := client.Probe(probe)
 				stop()
 				if err != nil {
+					probeErr = err
 					cancel()
 					return
 				}
@@ -215,4 +242,43 @@ func serveRequest(ctx context.Context, c net.Conn, g *gateway.Gateway, identity 
 			return errors.Join(readErr, write(proxywire.Abort, nil))
 		}
 	}
+}
+
+// runError 在调用方主动取消时剔除传输终止错误，保留同一组合错误中的真实故障。
+func runError(ctx context.Context, err error) error {
+	if ctx.Err() != context.Canceled || err == nil {
+		return err
+	}
+	return withoutRunErrors(err, context.Canceled, net.ErrClosed, io.ErrClosedPipe, io.EOF)
+}
+
+// withoutRunErrors 逐项剔除明确由生命周期收尾产生的错误，不整包忽略组合中的其他真实原因。
+func withoutRunErrors(err error, ignored ...error) error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(interface {
+		// Unwrap 返回组合错误的各个独立分支。
+		Unwrap() []error
+	}); ok {
+		var remaining []error
+		for _, cause := range joined.Unwrap() {
+			if failure := withoutRunErrors(cause, ignored...); failure != nil {
+				remaining = append(remaining, failure)
+			}
+		}
+		return errors.Join(remaining...)
+	}
+	if wrapped, ok := err.(interface {
+		// Unwrap 返回带上下文错误的实际原因。
+		Unwrap() error
+	}); ok {
+		return withoutRunErrors(wrapped.Unwrap(), ignored...)
+	}
+	for _, cause := range ignored {
+		if err == cause {
+			return nil
+		}
+	}
+	return err
 }

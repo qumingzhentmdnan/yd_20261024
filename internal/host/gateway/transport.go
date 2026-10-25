@@ -23,8 +23,11 @@ type service struct {
 	client *http.Client
 }
 
-// validPath 检查固定路由使用规范的无查询路径。
+// validPath 检查规范路由，仅允许已确认的Claude固定查询。
 func validPath(p string) bool {
+	if p == "/v1/messages?beta=true" {
+		return true
+	}
 	return strings.HasPrefix(p, "/") && path.Clean(p) == p && !strings.ContainsAny(p, "%?#\\\r\n\x00")
 }
 

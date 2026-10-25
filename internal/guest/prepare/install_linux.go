@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"safeagent/internal/manifest"
@@ -18,11 +19,21 @@ func Install(ctx context.Context, plan manifest.Plan, uid, gid int) (err error) 
 
 // install 让包内测试在实际发布边界注入取消，生产入口不安装闸门。
 func install(ctx context.Context, plan manifest.Plan, uid, gid int, beforePublish, afterPublish func()) (err error) {
-	executable, err := os.ReadFile(plan.Executable)
+	executable, err := os.Open(plan.Executable)
 	if err != nil {
 		return err
 	}
-	if fmt.Sprintf("sha256:%x", sha256.Sum256(executable)) != plan.ExecutableDigest {
+	// 原生 CLI 可达数百 MB，流式校验避免在每次 Prepare 中复制整份程序。
+	checksum := sha256.New()
+	_, hashErr := io.Copy(checksum, executable)
+	closeErr := executable.Close()
+	if hashErr != nil {
+		return hashErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if fmt.Sprintf("sha256:%x", checksum.Sum(nil)) != plan.ExecutableDigest {
 		return fmt.Errorf("executable digest mismatch")
 	}
 	parent, err := os.OpenRoot(filepath.Dir(plan.Home))

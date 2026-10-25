@@ -32,6 +32,10 @@ type registration struct {
 	executable string
 	// executableAsset 指定包内参与摘要的实际程序文件。
 	executableAsset string
+	// digestAsset 指定真实 CLI 的锁定摘要文件；空值表示直接读取小型内置程序。
+	digestAsset string
+	// modelProtocol 固定包允许的模型协议。
+	modelProtocol string
 	// environment 指定该包允许声明的环境名称。
 	environment []string
 }
@@ -54,7 +58,7 @@ type Definition struct {
 	runtime runtimeSpec
 	// packageRef 绑定可信包引用。
 	packageRef string
-	// executableDigest 绑定内置测试程序的实际字节。
+	// executableDigest 绑定所选包程序的实际字节。
 	executableDigest string
 	// files 保存已校验、排序的配置定义。
 	files []compiledFile
@@ -66,9 +70,23 @@ type Catalog struct {
 	entries map[string]*Definition
 }
 
-// NewCatalog 加载唯一明确登记的 probe，不把空 CLI 文件当作可运行内置清单。
+// NewCatalog 保留既有 probe 目录，供固定回归和未选择真实 CLI 的镜像使用。
 func NewCatalog() (*Catalog, error) {
-	reg := registration{ref: "probe@1.0.0", directory: "probe", packageRef: "probe-builtin-v1", executable: "/opt/agents/probe/bin/probe", executableAsset: "probe.sh", environment: []string{"HOME", "PATH", "PROBE_CONFIG", "SAFEAGENT_PROXY_KEY"}}
+	return NewCatalogFor("probe@1.0.0")
+}
+
+// NewCatalogFor 仅登记镜像明确选择的单个内置包，不接收任意资源或运行命令。
+func NewCatalogFor(ref string) (*Catalog, error) {
+	reg := registration{ref: "probe@1.0.0", directory: "probe", packageRef: "probe-builtin-v1", executable: "/opt/agents/probe/bin/probe", executableAsset: "probe.sh", modelProtocol: "test-http", environment: []string{"HOME", "PATH", "PROBE_CONFIG", "SAFEAGENT_PROXY_KEY"}}
+	switch ref {
+	case "probe@1.0.0":
+	case "codex@0.114.0":
+		reg = registration{ref: ref, directory: "codex", packageRef: "codex-linux-x64-0.114.0", executable: "/opt/agents/codex/bin/codex", digestAsset: "executable.sha256", modelProtocol: "openai-responses", environment: []string{"HOME", "PATH", "CODEX_HOME", "SAFEAGENT_PROXY_KEY", "TERM"}}
+	case "claude@2.1.81":
+		reg = registration{ref: ref, directory: "claude", packageRef: "claude-linux-x64-2.1.81", executable: "/opt/agents/claude/bin/claude", digestAsset: "executable.sha256", modelProtocol: "anthropic-messages", environment: []string{"HOME", "PATH", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER", "TERM"}}
+	default:
+		return nil, ErrUnknown
+	}
 	definition, err := loadDefinition(agents.Builtins(), reg)
 	if err != nil {
 		return nil, err
@@ -153,11 +171,24 @@ func loadDefinition(files fs.FS, reg registration) (*Definition, error) {
 	if err := validateSpec(spec, reg); err != nil {
 		return nil, err
 	}
-	executable, err := readAsset(files, path.Join(reg.directory, reg.executableAsset))
-	if err != nil {
-		return nil, err
+	executableDigest := ""
+	if reg.digestAsset == "" {
+		executable, err := readAsset(files, path.Join(reg.directory, reg.executableAsset))
+		if err != nil {
+			return nil, err
+		}
+		executableDigest = digest(executable)
+	} else {
+		locked, err := readAsset(files, path.Join(reg.directory, reg.digestAsset))
+		if err != nil {
+			return nil, err
+		}
+		executableDigest = strings.TrimSpace(string(locked))
+		if !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(executableDigest) {
+			return nil, ErrManifest
+		}
 	}
-	record := fingerprint{Manifest: digest(raw), Executable: digest(executable), Templates: make(map[string]string)}
+	record := fingerprint{Manifest: digest(raw), Executable: executableDigest, Templates: make(map[string]string)}
 	compiled := make([]compiledFile, 0, len(spec.Files))
 	templates := make(map[string]map[string]any)
 	for _, file := range spec.Files {
@@ -266,7 +297,7 @@ func validateSpec(s manifestSpec, reg registration) error {
 	if s.APIVersion != "safeagent.io/v1" || s.Kind != "AgentManifest" || !idPattern.MatchString(m.ID) || !versionPattern.MatchString(m.Version) || len(m.Version) > 64 || m.ID+"@"+m.Version != reg.ref || m.DisplayName == "" || m.Provenance.Source != "builtin" || m.Provenance.PackageRef != reg.packageRef {
 		return ErrManifest
 	}
-	if m.Support.OS != "linux" || !slices.Equal(m.Support.Architectures, []string{"amd64"}) || !slices.Equal(m.Support.Modes, []string{"pty"}) || s.Capabilities.Model.Protocol != "test-http" {
+	if m.Support.OS != "linux" || !slices.Equal(m.Support.Architectures, []string{"amd64"}) || !slices.Equal(m.Support.Modes, []string{"pty"}) || s.Capabilities.Model.Protocol != reg.modelProtocol {
 		return ErrManifest
 	}
 	if r.Executable != reg.executable || r.Cwd != "${workspace}" || r.Terminal != "pty" || r.User != "agent" || r.Environment["HOME"] != "${home}" || r.Environment["PATH"] != "/usr/bin:/bin" {

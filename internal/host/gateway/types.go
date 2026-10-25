@@ -68,7 +68,7 @@ type Service struct {
 	Ref string
 	// Origin 指定无路径、查询、用户信息或片段的 HTTPS 源站。
 	Origin string
-	// Paths 列出允许 POST 的精确绝对路径。
+	// Paths 列出允许POST的精确目标；仅Claude Messages允许固定?beta=true查询。
 	Paths []string
 	// AllowedNetworks 显式限制每次 DNS 查询后实际拨号的地址。
 	AllowedNetworks []netip.Prefix
@@ -106,7 +106,7 @@ type ProxyRequest struct {
 	ServiceRef string
 	// Method 本轮只接受 POST。
 	Method string
-	// Path 必须精确匹配已登记路径，不接受查询串。
+	// Path 必须精确匹配已登记目标；仅Claude Messages允许固定?beta=true查询。
 	Path string
 	// Headers 只允许读取固定白名单，调用期间调用方不得修改。
 	Headers http.Header

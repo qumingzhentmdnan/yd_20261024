@@ -198,12 +198,17 @@ func (g *Gateway) forward(f *flow, s *service, request ProxyRequest) (ProxyRespo
 		return ProxyResponse{}, ErrCredential
 	}
 	target := s.origin
-	target.Path = request.Path
+	target.Path, target.RawQuery, _ = strings.Cut(request.Path, "?")
 	upstream, err := http.NewRequestWithContext(f.ctx, request.Method, target.String(), bytes.NewReader(data))
 	if err != nil {
 		return ProxyResponse{}, err
 	}
 	upstream.Header = selectHeaders(request.Headers, "Content-Type", "Accept", "Anthropic-Version")
+	if s.config.Auth == APIKey && target.Path == "/v1/messages" {
+		for _, value := range request.Headers.Values("Anthropic-Beta") {
+			upstream.Header.Add("Anthropic-Beta", value)
+		}
+	}
 	if s.config.Auth == Bearer {
 		upstream.Header.Set("Authorization", "Bearer "+credential)
 	} else {
@@ -220,7 +225,13 @@ func (g *Gateway) forward(f *flow, s *service, request ProxyRequest) (ProxyRespo
 		return ProxyResponse{}, ErrTooLarge
 	}
 	f.touch()
-	return ProxyResponse{Status: response.StatusCode, Headers: selectHeaders(response.Header, "Content-Type", "Retry-After", "X-Request-Id"), Body: &responseBody{flow: f, source: response.Body, remaining: g.config.MaxResponseBytes}}, nil
+	headers := selectHeaders(response.Header, "Content-Type", "Retry-After", "X-Request-Id")
+	if s.config.Auth == APIKey && target.Path == "/v1/messages" {
+		for _, value := range response.Header.Values("X-Should-Retry") {
+			headers.Add("X-Should-Retry", value)
+		}
+	}
+	return ProxyResponse{Status: response.StatusCode, Headers: headers, Body: &responseBody{flow: f, source: response.Body, remaining: g.config.MaxResponseBytes}}, nil
 }
 
 // flow 统一管理取消、计时及输入输出资源的一次性释放。

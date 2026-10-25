@@ -17,7 +17,7 @@ import (
 // OpenTerminal 打开当前可信实例的独立终端通道。
 type OpenTerminal func(context.Context) (net.Conn, error)
 
-// pending 保存已发请求及固定响应状态，连接内不淘汰。
+// pending 保存已发请求及固定响应状态，只读请求完整验证响应后释放。
 type pending struct {
 	// request 用于严格验证迟到响应的方法及身份。
 	request protocol.Request
@@ -47,8 +47,12 @@ type Client struct {
 	slots chan struct{}
 	// mu 保护账本和不可逆退出状态。
 	mu sync.Mutex
-	// requests 保留本连接全部已发送请求。
+	// requests 保留历史非只读请求及尚未完整验证响应的 GetState。
 	requests map[protocol.Sequence]*pending
+	// retained 统计本连接非 GetState 历史请求，最多 MaxRequests。
+	retained int
+	// reading 统计已预留但未登记及尚未完整验证响应的 GetState，含已取消者，最多 MaxPending。
+	reading int
 	// next 是最近已分配请求序号。
 	next protocol.Sequence
 	// stream 是最近已分配终端流号。
@@ -96,6 +100,13 @@ func (c *Client) fail(err error) {
 	c.closeOnce.Do(func() {
 		c.mu.Lock()
 		c.failure = err
+		// 连接终止后不再接收迟到响应，释放只读登记；其他历史保留到 Client 回收。
+		for id, p := range c.requests {
+			if p.request.Method == protocol.MethodGetState {
+				delete(c.requests, id)
+			}
+		}
+		c.reading = 0
 		t := c.terminal
 		c.mu.Unlock()
 		c.cancel()
@@ -158,7 +169,15 @@ func (c *Client) readLoop() {
 				}
 			}
 			c.mu.Lock()
+			if c.failure != nil {
+				c.mu.Unlock()
+				return
+			}
 			p.received = true
+			if p.request.Method == protocol.MethodGetState {
+				delete(c.requests, r.RequestID)
+				c.reading--
+			}
 			c.mu.Unlock()
 			p.done <- r
 		case protocol.EventKind:
@@ -211,6 +230,31 @@ func (c *Client) callWithCancellation(ctx context.Context, method protocol.Metho
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	registered := false
+	if method == protocol.MethodGetState {
+		// 先预留独立账本资格，避免十六个活动调用占满 slots 后新查询只能等待。
+		c.mu.Lock()
+		if c.failure != nil {
+			c.mu.Unlock()
+			return c.disconnected()
+		}
+		if c.reading >= protocol.MaxPending {
+			c.mu.Unlock()
+			return protocol.Failure(protocol.CodeResourceExhausted)
+		}
+		c.reading++
+		c.mu.Unlock()
+		defer func() {
+			if !registered {
+				// 尚未发出的请求没有迟到响应；连接失效时占额已经统一释放。
+				c.mu.Lock()
+				if c.failure == nil {
+					c.reading--
+				}
+				c.mu.Unlock()
+			}
+		}()
+	}
 	select {
 	case c.slots <- struct{}{}:
 	case <-ctx.Done():
@@ -223,6 +267,7 @@ func (c *Client) callWithCancellation(ctx context.Context, method protocol.Metho
 	if err != nil {
 		return err
 	}
+	registered = true
 	select {
 	case response := <-p.done:
 		if response.Error != nil {
@@ -256,7 +301,7 @@ func (c *Client) sendRequest(ctx context.Context, method protocol.Method, params
 		return nil, err
 	}
 	c.mu.Lock()
-	if c.next >= protocol.MaxRequests {
+	if c.next == ^protocol.Sequence(0) {
 		c.mu.Unlock()
 		return nil, protocol.Failure(protocol.CodeResourceExhausted)
 	}
@@ -284,6 +329,18 @@ func (c *Client) sendRequest(ctx context.Context, method protocol.Method, params
 	}
 	p := &pending{request: r, done: make(chan protocol.Response, 1)}
 	c.mu.Lock()
+	// 写资格串行分配序号；只读占额已在等待资格前预留，取消不能提前释放。
+	if c.failure != nil {
+		c.mu.Unlock()
+		return nil, c.disconnected()
+	}
+	if method != protocol.MethodGetState {
+		if c.retained >= protocol.MaxRequests {
+			c.mu.Unlock()
+			return nil, protocol.Failure(protocol.CodeResourceExhausted)
+		}
+		c.retained++
+	}
 	c.next = id
 	c.requests[id] = p
 	c.mu.Unlock()
@@ -429,8 +486,27 @@ func (c *Client) Identity() (vm.VMInstance, string, error) {
 // Done 在控制连接失效时关闭，不表示VM已被回收。
 func (c *Client) Done() <-chan struct{} { return c.ctx.Done() }
 
+// Failure 返回首次连接失败原因；健康时为nil，Done关闭后结果固定，读取始终并发安全。
+func (c *Client) Failure() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.failure
+}
+
 // Probe 在所有资格和响应失败路径使控制连接失效，不追加Cancel预算。
 func (c *Client) Probe(ctx context.Context) error {
+	// Probe任一阶段取消都失效独占控制连接，先固定取消原因再关闭以打断同步写帧。
+	// 已发生并固定的协议、业务或网络超时由fail的一次性边界保留，不会被取消覆盖。
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(finished)
+		c.fail(ctx.Err())
+	})
+	defer func() {
+		if !stop() {
+			<-finished
+		}
+	}()
 	var result protocol.GuestState
 	err := c.callWithCancellation(ctx, protocol.MethodGetState, protocol.Empty{}, &result, false)
 	if err != nil {

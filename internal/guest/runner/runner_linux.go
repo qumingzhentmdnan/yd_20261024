@@ -243,27 +243,37 @@ func (p *Process) groupLocked() (protocol.GroupState, error) {
 		if _, err := strconv.Atoi(entry.Name()); err != nil {
 			continue
 		}
-		data, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
+		running, err := processInGroup("/proc/"+entry.Name()+"/stat", group)
 		if err != nil {
 			return protocol.GroupStateUnknown, err
 		}
-		end := strings.LastIndexByte(string(data), ')')
-		if end < 0 {
-			return protocol.GroupStateUnknown, fmt.Errorf("invalid proc stat")
-		}
-		fields := strings.Fields(string(data)[end+1:])
-		if len(fields) < 3 {
-			return protocol.GroupStateUnknown, fmt.Errorf("short proc stat")
-		}
-		if fields[2] == group && fields[0] != "Z" && fields[0] != "X" {
+		if running {
 			return protocol.GroupStateRunning, nil
 		}
 	}
 	p.groupEmpty = true
 	return protocol.GroupStateEmpty, nil
+}
+
+// processInGroup 读取单个 proc stat，判断是否为指定组内仍可执行的成员。
+func processInGroup(path, group string) (bool, error) {
+	data, err := os.ReadFile(path)
+	// proc 在打开前消失返回 ENOENT，打开后回收则可能在读取时返回 ESRCH。
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	end := strings.LastIndexByte(string(data), ')')
+	if end < 0 {
+		return false, fmt.Errorf("invalid proc stat")
+	}
+	fields := strings.Fields(string(data)[end+1:])
+	if len(fields) < 3 {
+		return false, fmt.Errorf("short proc stat")
+	}
+	return fields[2] == group && fields[0] != "Z" && fields[0] != "X", nil
 }
 
 // Signal 向仍存活的当前工作负载组发送显式停止信号。

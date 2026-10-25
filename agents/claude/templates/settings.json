@@ -1,0 +1,9 @@
+{
+  "model": "claude-sonnet-4-6",
+  "env": {
+    "ANTHROPIC_BASE_URL": "${modelGatewayURL}",
+    "ANTHROPIC_AUTH_TOKEN": "proxy-managed",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

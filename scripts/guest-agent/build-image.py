@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from real_packages import install
+
 
 # digest 计算镜像登记文件的真实摘要。
 def digest(data):
@@ -22,13 +24,23 @@ def main():
     parser.add_argument('--proxy', action='store_true')
     parser.add_argument('--workspace', action='store_true')
     parser.add_argument('--manifest', action='store_true')
+    parser.add_argument('--agent', choices=['codex', 'claude', 'probe'])
+    parser.add_argument('--packages', type=Path, help='已校验的离线包目录，真实 CLI 必填')
     args = parser.parse_args()
+    if args.agent:
+        args.manifest = True
+    if args.agent in ('codex', 'claude'):
+        if args.packages is None:
+            parser.error('--agent codex|claude requires --packages')
+        args.proxy = True
+    selected = args.agent or 'probe'
     if args.manifest and not args.workspace:
         parser.error('--manifest requires --workspace for real imported project')
     args.output.mkdir(parents=True, exist_ok=False)
     root = args.output.resolve() / 'rootfs'
     shutil.copytree(args.assets.resolve() / 'rootfs', root, symlinks=True)
     repo = Path(__file__).resolve().parents[2]
+    package_record = install(repo, root, args.packages.resolve(), selected) if selected != 'probe' and args.manifest else None
     environment = dict(os.environ, CGO_ENABLED='1' if args.race else '0', GOOS='linux', GOARCH='amd64')
     command = ['go', 'build'] + (['-race'] if args.race else []) + ['-o', str(root / 'bin/guest-agent'), './cmd/guest-agent']
     subprocess.run(command, cwd=repo, env=environment, check=True)
@@ -59,20 +71,25 @@ while :; do sleep 1; done
     (root / 'bin/fixed-workload').chmod(0o755)
     if args.manifest:
         config = b'manifest-prepare-v1\nhomeRoot=/home/agent\nworkspace=/workspace/project\nmodelGatewayURL=http://127.0.0.1:18080\n'
-        # 安装内置 probe，登记摘要与 Go manifest.Catalog 的 fingerprint 保持一致。
-        probe_dir = root / 'opt/agents/probe/bin'
-        probe_dir.mkdir(parents=True, exist_ok=True)
-        probe = repo / 'agents/probe/probe.sh'
-        shutil.copyfile(probe, probe_dir / 'probe')
-        (probe_dir / 'probe').chmod(0o755)
-        manifest_raw = (repo / 'agents/probe/agent.yaml').read_bytes()
-        template_raw = (repo / 'agents/probe/templates/settings.json').read_bytes()
-        record = {'Manifest': digest(manifest_raw), 'Executable': digest(probe.read_bytes()), 'Templates': {'templates/settings.json': digest(template_raw)}}
-        manifest_digest = digest(json.dumps(record, separators=(',', ':')).encode())
+        # 仅安装并登记明确选择的包，摘要与 Go Catalog 的 fingerprint 一致。
+        if selected == 'probe':
+            probe_dir = root / 'opt/agents/probe/bin'
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            probe = repo / 'agents/probe/probe.sh'
+            shutil.copyfile(probe, probe_dir / 'probe')
+            (probe_dir / 'probe').chmod(0o755)
+        agent_dir = repo / 'agents' / selected
+        manifest_raw = (agent_dir / 'agent.yaml').read_bytes()
+        template_paths = {'probe': ['templates/settings.json'], 'codex': ['templates/codex-config.toml.tmpl'], 'claude': ['templates/settings.json']}[selected]
+        executable = '/opt/agents/' + selected + '/bin/' + selected
+        executable_digest = digest((root / executable.lstrip('/')).read_bytes())
+        record = {'Manifest': digest(manifest_raw), 'Executable': executable_digest, 'Templates': {name: digest((agent_dir / name).read_bytes()) for name in template_paths}}
+        manifest_digest = digest(json.dumps(record, separators=(',', ':'), sort_keys=False).encode())
+        version = {'probe': '1.0.0', 'codex': '0.114.0', 'claude': '2.1.81'}[selected]
         for name, value in [('manifest', manifest_raw), ('config', config), ('workspace', workspace)]:
             (fixed / name).write_bytes(value)
-        content = dict(preparedID='registered', manifestRef='probe@1.0.0', manifestDigest=manifest_digest, configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
-        registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable='/opt/agents/probe/bin/probe', directory='/home/agent', content=content)
+        content = dict(preparedID='registered', manifestRef=selected + '@' + version, manifestDigest=manifest_digest, configDigest=digest(config), workspaceRef='fixed-workspace', workspaceDigest=digest(workspace))
+        registration = dict(manifest='/etc/safeagent/manifest', configuration='/etc/safeagent/config', workspace='/etc/safeagent/workspace', executable=executable, directory='/home/agent', content=content)
     else:
         for name, value in [('manifest', workload), ('config', config), ('workspace', workspace)]:
             (fixed / name).write_bytes(value)
@@ -119,7 +136,7 @@ while :; do sleep 60; done
     (root / 'init').chmod(0o755)
     with (args.output / 'initramfs.cpio.gz').open('wb') as target:
         subprocess.run(['bash', '-o', 'pipefail', '-c', 'find . -print0 | cpio --null -o --format=newc --owner=0:0 2>/dev/null | gzip -1'], cwd=root, stdout=target, check=True)
-    (args.output / 'build.json').write_text(json.dumps(dict(race=args.race, manifest=args.manifest, command=command, initramfsDigest=digest((args.output / 'initramfs.cpio.gz').read_bytes())), indent=2) + '\n')
+    (args.output / 'build.json').write_text(json.dumps(dict(race=args.race, manifest=args.manifest, package=package_record, command=command, initramfsDigest=digest((args.output / 'initramfs.cpio.gz').read_bytes())), indent=2) + '\n')
 
 
 if __name__ == '__main__':

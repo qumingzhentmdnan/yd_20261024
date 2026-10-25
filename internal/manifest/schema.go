@@ -82,6 +82,6 @@ type capabilitiesSpec struct {
 
 // modelSpec 保存模型协议标签。
 type modelSpec struct {
-	// Protocol 本轮固定为 test-http。
+	// Protocol 描述固定包使用的模型协议。
 	Protocol string `yaml:"protocol"`
 }

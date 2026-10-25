@@ -130,7 +130,7 @@ func TestUnknownResponse(t *testing.T) {
 	}
 }
 
-// TestRequestLedgerCapacity 验证四千零九十六条记录不淘汰，达到上限后保持可关闭。
+// TestRequestLedgerCapacity 验证非只读历史记录不淘汰，达到上限后保持可关闭。
 func TestRequestLedgerCapacity(t *testing.T) {
 	c, p := wireClient(t)
 	peerDone := make(chan struct{})
@@ -138,16 +138,16 @@ func TestRequestLedgerCapacity(t *testing.T) {
 		defer close(peerDone)
 		for range protocol.MaxRequests {
 			r := receiveRequest(t, p)
-			sendResult(t, p, r, protocol.GuestState{Sessions: []protocol.SessionInfo{}})
+			sendResult(t, p, r, protocol.Empty{})
 		}
 	}()
 	for range protocol.MaxRequests {
-		if _, err := c.GetState(context.Background()); err != nil {
+		if err := c.StopSession(context.Background(), protocol.StopSessionParams{SessionID: "session", GraceMs: 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	<-peerDone
-	_, err := c.GetState(context.Background())
+	err := c.StopSession(context.Background(), protocol.StopSessionParams{SessionID: "session", GraceMs: 1})
 	var e *protocol.Error
 	if !errors.As(err, &e) || e.Code != protocol.CodeResourceExhausted {
 		t.Fatal(err)

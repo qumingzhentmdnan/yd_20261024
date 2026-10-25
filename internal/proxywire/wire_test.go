@@ -107,3 +107,44 @@ func TestShortWriteAndMetadata(t *testing.T) {
 		}
 	}
 }
+
+// TestIncompleteFrameKeepsBudget 验证较长首字节截止不会放宽半个物理帧的两秒完整读取预算。
+func TestIncompleteFrameKeepsBudget(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	written := make(chan error, 1)
+	go func() { _, err := left.Write([]byte{'S'}); written <- err }()
+	start := time.Now()
+	_, err := Read(right, start.Add(Total))
+	if err == nil {
+		t.Fatal("不完整帧没有超时")
+	}
+	timeout, ok := err.(net.Error)
+	if !ok || !timeout.Timeout() {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	if elapsed < Budget || elapsed > Budget+time.Second {
+		t.Fatal("完整帧预算改变", elapsed)
+	}
+	if err = <-written; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFirstByteHonorsTotalDeadline 验证尚未到达首字节也必须服从调用方的请求硬截止。
+func TestFirstByteHonorsTotalDeadline(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	start := time.Now()
+	_, err := Read(right, start.Add(50*time.Millisecond))
+	timeout, ok := err.(net.Error)
+	if !ok || !timeout.Timeout() {
+		t.Fatal("首字节等待没有总截止", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("总截止没有及时生效")
+	}
+}

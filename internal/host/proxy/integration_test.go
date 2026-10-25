@@ -598,7 +598,7 @@ func TestQEMUProxyStartupCancellation(t *testing.T) {
 			if cleanupResult != nil {
 				t.Fatal("Run启动取消清理失败", cleanupResult)
 			}
-			if err == nil || !cleanupCalled || readyCalled != (stage == "ready") {
+			if err != nil || !cleanupCalled || readyCalled != (stage == "ready") {
 				t.Fatal("启动取消语义错误", err, cleanupCalled, readyCalled)
 			}
 			// 同一身份重新绑定必须成功：若旧绑定残留，Gateway会返回Conflict。

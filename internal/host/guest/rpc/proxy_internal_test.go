@@ -2,10 +2,12 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
 
+	"safeagent/internal/guestwire"
 	"safeagent/internal/host/vm"
 	"safeagent/internal/protocol"
 )
@@ -53,9 +55,9 @@ func TestProbeFailureStages(t *testing.T) {
 			case "write":
 				c.write <- struct{}{}
 			case "response":
-				go func() { buffer := make([]byte, 65536); right.Read(buffer) }()
+				go func() { guestwire.Read(right, protocol.Control, protocol.HostToGuest) }()
 			case "capacity":
-				c.next = protocol.MaxRequests
+				c.reading = protocol.MaxPending
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 			defer cancel()
@@ -66,6 +68,18 @@ func TestProbeFailureStages(t *testing.T) {
 			case <-c.Done():
 			default:
 				t.Fatal("Probe失败未失效连接")
+			}
+			failure := c.Failure()
+			if stage == "capacity" {
+				var business *protocol.Error
+				if !errors.As(failure, &business) || business.Code != protocol.CodeResourceExhausted {
+					t.Fatal("本地Probe容量失败未保存", failure)
+				}
+			} else {
+				var timeout net.Error
+				if !errors.Is(failure, context.DeadlineExceeded) && (!errors.As(failure, &timeout) || !timeout.Timeout()) {
+					t.Fatal("Probe阶段deadline未保存", stage, failure)
+				}
 			}
 		})
 	}

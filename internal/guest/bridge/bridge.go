@@ -176,7 +176,8 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.Close()
 		panic(http.ErrAbortHandler)
 	}
-	f, err := proxywire.Read(b.conn, proxywire.Deadline(total))
+	// 模型可在请求总预算内静默思考；Read仍从首字节起限制完整物理帧为两秒。
+	f, err := proxywire.Read(b.conn, total)
 	if err != nil || f.ID != id || f.Kind != proxywire.Response {
 		b.Close()
 		panic(http.ErrAbortHandler)
@@ -193,7 +194,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(response.Status)
 	for {
-		f, err = proxywire.Read(b.conn, proxywire.Deadline(total))
+		f, err = proxywire.Read(b.conn, total)
 		if err != nil || f.ID != id {
 			b.Close()
 			panic(http.ErrAbortHandler)
