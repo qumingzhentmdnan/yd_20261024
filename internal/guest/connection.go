@@ -300,6 +300,9 @@ func (c *connection) execute(ctx context.Context, method protocol.Method, params
 		return nil, nil, err
 	}
 	switch method {
+	case protocol.MethodListChanges, protocol.MethodReadChangeChunk:
+		v, err := c.exportWorkspace(ctx, params)
+		return v, nil, err
 	case protocol.MethodGetState:
 		return c.state(), nil, nil
 	case protocol.MethodPrepareAgent:

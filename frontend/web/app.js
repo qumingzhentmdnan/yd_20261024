@@ -1,0 +1,21 @@
+'use strict';
+const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);let files=[];let selectionRoot='';let text='';let reviewID='';let inputQueue=Promise.resolve();const decoder=new TextDecoder();const $=id=>document.getElementById(id);
+// api 只向当前本地服务发送认证请求，不持久化凭据。
+async function api(path,body={}){const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});if(!response.ok)throw new Error(await response.text());return response.json();}
+// showError 以纯文本显示本机服务已脱敏错误。
+function showError(error){$('status').textContent=error.message;}
+$('list').onclick=async()=>{try{const project=$('project').value;files=await api('files',{project});selectionRoot=project;$('files').replaceChildren();for(const file of files){const label=document.createElement('label');const input=document.createElement('input');input.type='checkbox';input.checked=file.selected;input.onchange=()=>file.selected=input.checked;label.append(input,document.createTextNode(file.path+(file.warning?' — '+file.warning:'')));if(file.warning)label.className='warning';$('files').append(label);}}catch(error){showError(error);}};
+$('project').oninput=()=>{selectionRoot='';files=[];$('files').replaceChildren();};
+$('setup').onsubmit=async event=>{event.preventDefault();try{if(selectionRoot!==$('project').value)throw new Error('请先读取当前项目候选文件并确认选择');const mcp=[];if($('mcpURL').value){if(!$('mcpConfirm').checked)throw new Error('请明确确认 MCP 工具授权');mcp.push({ref:$('mcpRef').value,url:$('mcpURL').value,key:$('mcpKey').value,allowedTools:$('mcpTools').value.split(',').map(v=>v.trim()).filter(Boolean)});}const request={agent:$('agent').value,model:$('model').value,origin:$('origin').value,key:$('key').value,project:$('project').value,files:files.filter(f=>f.selected).map(f=>f.path),mcp};$('key').value='';$('mcpKey').value='';await api('start',request);text='';$('terminal').textContent='';}catch(error){$('key').value='';$('mcpKey').value='';showError(error);}};
+// sendInput 将原始 UTF-8 字节转换为 JSON base64，避免行缓冲。
+function sendInput(value){inputQueue=inputQueue.then(()=>writeInput(value));}
+// writeInput 保持键盘与粘贴事件的字节顺序。
+async function writeInput(value){const data=new TextEncoder().encode(value);let encoded='';for(const byte of data)encoded+=String.fromCharCode(byte);try{await api('input',{data:btoa(encoded)});}catch(error){showError(error);}}
+$('terminal').onkeydown=event=>{let value;const keys={Enter:'\r',Backspace:'\x7f',Tab:'\t',Escape:'\x1b',ArrowUp:'\x1b[A',ArrowDown:'\x1b[B',ArrowRight:'\x1b[C',ArrowLeft:'\x1b[D'};if(event.ctrlKey&&event.key.length===1)value=String.fromCharCode(event.key.toUpperCase().charCodeAt(0)&31);else value=keys[event.key]||(event.key.length===1&&!event.metaKey?event.key:null);if(value){event.preventDefault();sendInput(value);}};
+$('terminal').onpaste=event=>{event.preventDefault();sendInput(event.clipboardData.getData('text'));};
+for(const action of ['review','stop','apply','retain'])$(action).onclick=async()=>{try{await api(action,{id:reviewID});}catch(error){showError(error);}};
+// poll 消费有界终端缓冲，所有不可信输出均以 textContent 展示。
+async function poll(){try{const result=await api('poll');if($('status').textContent!==result.state&&result.state==='running')resizeTerminal();$('status').textContent=result.state;if(result.output){const bytes=Uint8Array.from(atob(result.output),c=>c.charCodeAt(0));const chunk=decoder.decode(bytes,{stream:true});if(chunk.includes('\x1b[6n'))sendInput('\x1b[1;1R');text+=chunk;text=text.slice(-500000);$('terminal').textContent=text.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');$('terminal').scrollTop=$('terminal').scrollHeight;}$('reviewBox').hidden=!result.review;if(result.review){reviewID=result.review.id;$('diff').textContent='审核ID: '+result.review.id+'\n'+result.review.diff;}}catch(error){showError(error);}setTimeout(poll,300);}poll();
+// resizeTerminal 将可见区域的估计行列同步到真实Guest PTY。
+function resizeTerminal(){const terminal=$('terminal');const cols=Math.max(20,Math.min(500,Math.floor((terminal.clientWidth-36)/8.4)));api('resize',{rows:32,cols}).catch(()=>{});}
+new ResizeObserver(resizeTerminal).observe($('terminal'));

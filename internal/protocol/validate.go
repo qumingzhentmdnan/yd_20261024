@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"fmt"
+	"io/fs"
 	"reflect"
 	"regexp"
 	"unicode/utf8"
@@ -21,7 +22,7 @@ const (
 	MaxOperations = 256
 	MaxSessions   = 64
 	MaxPending    = 16
-	MaxRequests   = 4096
+	MaxRequests   = 8192
 	OutputLimit   = 65536
 )
 
@@ -78,6 +79,14 @@ func validateValue(v reflect.Value) error {
 		return Validate(*x)
 	case Error:
 		bad = utf8.RuneCountInString(x.Message) > 256
+	case ListChangesParams:
+		bad = x.Cursor < 0 || x.Cursor > 4096
+	case ReadChangeChunkParams:
+		bad = x.Offset < 0 || x.Offset > 16<<20 || len(x.Path) > 1024 || !fs.ValidPath(x.Path)
+	case ChangePage:
+		bad = len(x.Entries) > 8 || x.Next < 0 || x.Next > 4096
+	case ChangeChunk:
+		bad = len(x.Data) > ExportChunkBytes
 	case HelloParams:
 		bad = len(x.SupportedVersions) != 1 || x.SupportedVersions[0] != "0.1"
 	case HelloResult:
@@ -130,6 +139,10 @@ func validateValue(v reflect.Value) error {
 			}
 		}
 	case reflect.Slice:
+		// 原始JSON和文件块的字节没有逐元素业务约束，避免在Guest上反射扫描整帧。
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return nil
+		}
 		for i := 0; i < v.Len(); i++ {
 			if err := validateValue(v.Index(i)); err != nil {
 				return err

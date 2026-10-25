@@ -176,6 +176,13 @@ func required(data []byte, v reflect.Value) error {
 			}
 		}
 	case reflect.Slice:
+		// 字节切片采用base64字符串，Decode已验证编码；null检查仍在上方生效。
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			if len(bytes.TrimSpace(data)) == 0 || bytes.TrimSpace(data)[0] != '"' {
+				return Failure(CodeInvalidArgument)
+			}
+			return nil
+		}
 		var items []json.RawMessage
 		if err := json.Unmarshal(data, &items); err != nil {
 			return err

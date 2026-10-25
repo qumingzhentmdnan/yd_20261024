@@ -91,7 +91,7 @@ JSON 必须为单个对象，不接受尾随第二个值或重复键。v0.1 不�
 - `timeoutMs` 是接收完整请求后开始计算的相对预算，范围 1..30000，不传墙钟绝对 deadline；Host 自己仍执行原 context 的 deadline。
 - Cancel 与完成竞态按 Guest 的实际完成点决定。取消不能回滚已经提交的 Prepare/Start，Host 超时也不能推断进程未创建。
 - 收到重复或倒退 requestID 是协议错误并关闭连接；不缓存重复 request 的 response。业务重试使用新 requestID 和原 operationID。
-- Host 为本 connection 已发出但已取消/超时的请求保留迟到响应识别记录。迟到的第一个 response 仍完整校验身份、方法与结果后丢弃；重复 response 或从未发出 requestID 的 response 关闭连接。非 GetState 请求每 connection 最多 4096 个，历史记录不提前淘汰；GetState 不占用该历史容量，而有独立的 16 个尚未完整验证响应的账本槽位（包含调用方已取消者）。发送登记前原子占额，满额返回 RESOURCE_EXHAUSTED 且不发送；完整验证成功或错误 response 后释放，连接终止释放全部只读登记。序号始终 uint64 严格递增、不得重用，耗尽明确拒绝。Guest 同样不把 GetState 计入历史请求数，保留原业务任务与响应队列限额；operation 去重不受影响。旧镜像仍有全部请求4096限制，必须与新 Host 配套装配，不通过自动重连规避。
+- Host 为本 connection 已发出但已取消/超时的请求保留迟到响应识别记录。迟到的第一个 response 仍完整校验身份、方法与结果后丢弃；重复 response 或从未发出 requestID 的 response 关闭连接。非 GetState 请求每 connection 最多 8192 个，历史记录不提前淘汰；GetState 不占用该历史容量，而有独立的 16 个尚未完整验证响应的账本槽位（包含调用方已取消者）。发送登记前原子占额，满额返回 RESOURCE_EXHAUSTED 且不发送；完整验证成功或错误 response 后释放，连接终止释放全部只读登记。序号始终 uint64 严格递增、不得重用，耗尽明确拒绝。Guest 同样不把 GetState 计入历史请求数，保留原业务任务与响应队列限额；operation 去重不受影响。旧镜像仍有全部请求4096限制，必须与新 Host 配套装配，不通过自动重连规避。
 - Prepare/Start 的 operation 去重属于 Guest 的 boot epoch，控制重连不清空。最多保存 256 个操作，直至 VMM 重启；不按 TTL 淘汰，满时拒绝新操作。GetState、Cancel 和 Stop 不占用新操作槽位。
 - 同 operationID、同方法及同语义参数返回原结果；相同 ID 的并发调用等待同一执行结果；不同参数返回 CONFLICT。比较结构化字段，不能直接比较 JSON 字节或依赖 map 遍历顺序；规范摘要在 schema 固定后统一实现。
 - 一旦操作被接纳，占用记录并保留最终成功或失败结果。未接纳的参数错误、权限错误或容量错误不建立记录。接纳后取消产生的最终结果也保留；不能用相同 ID 偷换参数。
@@ -245,3 +245,8 @@ WaitSession 先在唯一控制读循环维护的状态表注册等待，再触�
 6. 对照 `interfaces-and-fakes.md` 第 7.3 节逐项记录结果并做只读 review；未完成项明确标注。生产实现先复用本轮共享基础，任务交接见 `../docs/tasks/guest-agent.md`；完成后集中复审和冻结，不各自重定义协议。
 
 固定工作负载的正常/异常业务链路已有真实 TCG 证据；新增生产字段、完整容量与恢复策略、共享 Fake/真实契约和双 reviewer 流程尚未全部完成，当前仍不开放按本文独立并发生产实现。
+
+
+### 工作区审核读取扩展
+
+`ListChanges({cursor})` 在导入成功且所有进程组为空后冻结普通文件清单，每页最多8条（即使路径JSON转义膨胀也不超过64KiB控制帧）（path/size/executable/digest），next=0结束。冻结后禁止重新Prepare/Start。`ReadChangeChunk({path,offset})` 返回最多32768字节base64内容。Host检查规范相对路径、文件总数、大小与每个SHA-256，完整冻结内容后才能批准。分页复用首次清单，避免重复扫描。新增8192历史请求上限覆盖4096文件与64MiB读取，同时保留现有16个并发任务上限。新旧Host/Guest必须配套构建，不做静默兼容。

@@ -1,107 +1,17 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/netip"
-	"os"
-	"path/filepath"
-	"strings"
-
-	"safeagent/internal/host/vm"
+	"safeagent/internal/host/launchconfig"
 	"safeagent/internal/protocol"
-	"safeagent/internal/workspacebundle"
 )
 
-// launchConfig 保存用户显式选择的宿主配置；不接受任何密钥字段。
-type launchConfig struct {
-	// Agent 选择镜像已安装的codex或claude。
-	Agent string `json:"agent"`
-	// QEMU 是可信QEMU可执行文件的绝对路径。
-	QEMU string `json:"qemu"`
-	// QEMUImg 是可信qemu-img的绝对路径。
-	QEMUImg string `json:"qemuImg"`
-	// DataRoot 是本入口独占的宿主私有资源目录。
-	DataRoot string `json:"dataRoot"`
-	// Image 保存可信内核、initramfs及基础盘路径。
-	Image vm.Image `json:"image"`
-	// ContentFile 是所选镜像构建输出content.json的绝对路径。
-	ContentFile string `json:"contentFile"`
-	// Accelerator 必须明确选择kvm或tcg，不自动回退。
-	Accelerator vm.Accelerator `json:"accelerator"`
-	// VCPUs 是本次VM的CPU数量。
-	VCPUs uint16 `json:"vcpus"`
-	// MemoryMiB 是本次VM内存，单位MiB。
-	MemoryMiB uint32 `json:"memoryMiB"`
-	// Project 是用户确认导入的宿主绝对源目录。
-	Project string `json:"project"`
-	// Files 是精确的相对普通文件列表；空列表表示空项目。
-	Files []string `json:"files"`
-	// Origin 是Host批准的HTTPS模型源站，不含API路径。
-	Origin string `json:"origin"`
-	// AllowedNetworks 显式约束源站DNS解析后的实际拨号地址。
-	AllowedNetworks []netip.Prefix `json:"allowedNetworks"`
-}
+// launchConfig 复用不含密钥的可信启动配置。
+type launchConfig = launchconfig.Config
 
-// readJSON 限制宿主配置大小并拒绝未知字段、尾随值及截断输入。
-func readJSON(path string, target any) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-	if err != nil {
-		return err
-	}
-	if len(data) > 1<<20 {
-		return fmt.Errorf("配置超过1MiB")
-	}
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err = decoder.Decode(&extra); err != io.EOF {
-		return fmt.Errorf("配置必须只有一个JSON值")
-	}
-	return nil
-}
+// readJSON 复用严格的宿主 JSON 边界校验。
+func readJSON(path string, target any) error { return launchconfig.ReadJSON(path, target) }
 
-// loadConfig 在读取密钥或创建VM之前校验用户选择与镜像登记。
+// loadConfig 校验可信镜像与显式导入选择。
 func loadConfig(path string) (launchConfig, protocol.Preparation, error) {
-	var config launchConfig
-	var content protocol.Preparation
-	if err := readJSON(path, &config); err != nil {
-		return config, content, err
-	}
-	if config.Agent != "codex" && config.Agent != "claude" {
-		return config, content, fmt.Errorf("agent必须为codex或claude")
-	}
-	for _, path := range []string{config.QEMU, config.QEMUImg, config.DataRoot, config.ContentFile, config.Project} {
-		if !filepath.IsAbs(path) {
-			return config, content, fmt.Errorf("宿主资源路径必须为绝对路径")
-		}
-	}
-	if config.Accelerator != vm.KVM && config.Accelerator != vm.TCG {
-		return config, content, fmt.Errorf("加速器必须显式选择kvm或tcg")
-	}
-	if err := readJSON(config.ContentFile, &content); err != nil {
-		return config, content, err
-	}
-	if !strings.HasPrefix(string(content.ManifestRef), config.Agent+"@") {
-		return config, content, fmt.Errorf("镜像清单与所选agent不匹配")
-	}
-	if err := protocol.Validate(content); err != nil {
-		return config, content, err
-	}
-	if _, err := workspacebundle.ValidateSelection(config.Files, workspacebundle.GuestLimits()); err != nil {
-		return config, content, err
-	}
-	if err := (vm.VMConfig{ID: "validation", Architecture: vm.AMD64, Machine: vm.MicroVM, Accelerator: config.Accelerator, VCPUs: config.VCPUs, MemoryMiB: config.MemoryMiB, Image: config.Image}).Validate(); err != nil {
-		return config, content, err
-	}
-	return config, content, nil
+	return launchconfig.Load(path)
 }

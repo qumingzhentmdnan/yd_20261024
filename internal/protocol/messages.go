@@ -119,6 +119,10 @@ func (r Request) DecodeParams() (any, error) {
 	switch r.Method {
 	case MethodHello:
 		target = &HelloParams{}
+	case MethodListChanges:
+		target = &ListChangesParams{}
+	case MethodReadChangeChunk:
+		target = &ReadChangeChunkParams{}
 	case MethodGetState:
 		target = &Empty{}
 	case MethodPrepareAgent:
@@ -172,6 +176,10 @@ func resultTarget(method Method) (any, error) {
 	switch method {
 	case MethodHello:
 		return &HelloResult{}, nil
+	case MethodListChanges:
+		return &ChangePage{}, nil
+	case MethodReadChangeChunk:
+		return &ChangeChunk{}, nil
 	case MethodGetState:
 		return &GuestState{}, nil
 	case MethodPrepareAgent:

@@ -1,0 +1,9 @@
+{
+  "name": "safeagent-local-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "随 Go Host 嵌入分发的本地隔离工作台，无外部 CDN 或构建依赖",
+  "scripts": {
+    "check": "node --check web/app.js"
+  }
+}

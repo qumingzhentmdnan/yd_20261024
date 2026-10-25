@@ -30,6 +30,8 @@ type ImportSelection struct {
 	Root string
 	// Paths 列出相对普通文件路径；空列表代表空工作区。
 	Paths []string
+	// Generated 保存仅导入 Guest 的公开运行配置，不能与源文件重名，也不参与导出。
+	Generated map[string][]byte
 }
 
 // Baseline 描述已持久化的不可变快照。

@@ -9,6 +9,7 @@ import (
 	"os"
 	"safeagent/internal/guest/prepare"
 	"safeagent/internal/manifest"
+	"safeagent/internal/workspacebundle"
 	"safeagent/internal/workspacewire"
 	"sort"
 	"sync"
@@ -74,6 +75,12 @@ type session struct {
 
 // Boot 在连接断开后继续拥有操作记录及工作负载。
 type Boot struct {
+	// exportMu 串行化冻结清单的首次构建与后续读取。
+	exportMu sync.Mutex
+	// exportEntries 保存停止后首次枚举的只读清单，nil表示尚未构建。
+	exportEntries []workspacebundle.Entry
+	// exportStarted 阻止冻结审核开始后重新启动Agent，由mu保护。
+	exportStarted bool
 	// importState 由mu保护，限制本boot一次导入。
 	importState importState
 	// imported 保存导入成功时的基线，不代表运行后内容不可变。
@@ -338,7 +345,7 @@ func (b *Boot) start(ctx context.Context, p protocol.StartSessionParams) (protoc
 
 // checkNewLocked 检查引用、生命周期及容量后才能预留，调用方持有 boot.mu。
 func (b *Boot) checkNewLocked(input any) error {
-	if b.reserved || (b.config.WorkspaceRoot != nil && b.importState != importCommitted) {
+	if b.reserved || b.exportStarted || (b.config.WorkspaceRoot != nil && b.importState != importCommitted) {
 		return protocol.Failure(protocol.CodeFailedPrecondition)
 	}
 	if len(b.operations) >= protocol.MaxOperations {

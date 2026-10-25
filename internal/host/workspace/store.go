@@ -36,6 +36,8 @@ type hostRecord struct {
 	Baseline Baseline `json:"baseline"`
 	// Root 保存 SourceRef 对应的 Host 授权目录。
 	Root string `json:"root"`
+	// Generated 列出 Host 生成且不得回写源项目的配置路径；旧基线为空。
+	Generated []string `json:"generated,omitempty"`
 }
 
 // NewStore 创建或打开私有基线存储，限额由调用方显式提供。
@@ -70,7 +72,7 @@ func newID(prefix string) string {
 
 // Stage 将已确认的文件选择复制为不可变基线后原子发布。
 func (s *Store) Stage(ctx context.Context, selection ImportSelection) (baseline Baseline, err error) {
-	paths, err := workspacebundle.ValidateSelection(selection.Paths, s.limits)
+	paths, generated, err := s.selectionPaths(selection)
 	if err != nil {
 		return baseline, err
 	}
@@ -82,6 +84,9 @@ func (s *Store) Stage(ctx context.Context, selection ImportSelection) (baseline 
 		return baseline, err
 	}
 	defer root.Close()
+	if err := checkGeneratedSource(root, generated); err != nil {
+		return baseline, err
+	}
 	id := newID("b_")
 	sourceRef := newID("s_")
 	temp := filepath.Join(s.dataDir, "staging", id)
@@ -97,7 +102,13 @@ func (s *Store) Stage(ctx context.Context, selection ImportSelection) (baseline 
 	m := Manifest{Version: 1, Entries: make([]Entry, 0, len(paths))}
 	var total int64
 	for i, p := range paths {
-		entry, copyErr := s.copySource(ctx, root, p, filepath.Join(temp, strconv.Itoa(i)), s.limits.MaxTotalBytes-total)
+		var entry Entry
+		var copyErr error
+		if data, ok := selection.Generated[p]; ok {
+			entry, copyErr = s.copyGenerated(ctx, p, data, filepath.Join(temp, strconv.Itoa(i)), s.limits.MaxTotalBytes-total)
+		} else {
+			entry, copyErr = s.copySource(ctx, root, p, filepath.Join(temp, strconv.Itoa(i)), s.limits.MaxTotalBytes-total)
+		}
 		if copyErr != nil {
 			return Baseline{}, copyErr
 		}
@@ -110,7 +121,7 @@ func (s *Store) Stage(ctx context.Context, selection ImportSelection) (baseline 
 		return baseline, err
 	}
 	baseline = Baseline{ID: BaselineID(id), SourceRef: sourceRef, Digest: digestBytes(manifest), FileCount: len(m.Entries), TotalBytes: total, ArchiveBytes: archiveBytes}
-	record, _ := json.Marshal(hostRecord{Version: 1, Baseline: baseline, Root: selection.Root})
+	record, _ := json.Marshal(hostRecord{Version: 1, Baseline: baseline, Root: selection.Root, Generated: generated})
 	if int64(len(record)) > maxHostMetadataBytes {
 		return Baseline{}, ErrLimitExceeded
 	}
@@ -341,6 +352,9 @@ func (s *Store) Lookup(ctx context.Context, id BaselineID) (Baseline, error) {
 	}
 	if err := workspacebundle.ValidateManifest(m, s.limits); err != nil {
 		return zero, errors.Join(ErrCorruptBaseline, err)
+	}
+	if err := validateGenerated(host.Generated, m, s.limits); err != nil {
+		return zero, err
 	}
 	var total int64
 	for _, entry := range m.Entries {

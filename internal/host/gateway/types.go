@@ -62,8 +62,25 @@ const (
 	APIKey AuthKind = "x-api-key"
 )
 
+// MCPFactory 为每个可信通道创建独立的协议处理器。
+type MCPFactory interface {
+	// NewSession 创建绑定生命周期内的独立 MCP 会话，不在创建时连接上游。
+	NewSession(*http.Client, CredentialStore, string) MCPSession
+}
+
+// MCPSession 由 Gateway 在绑定撤销时关闭，不能跨沙箱复用。
+type MCPSession interface {
+	http.Handler
+	// Revoke 在授权锁内发布取消，不等待网络或会话锁。
+	Revoke()
+	// Close 取消在途 MCP 请求并释放远端及本地协议会话。
+	Close() error
+}
+
 // Service 保存只存在于 Host 的固定路由与认证配置。
 type Service struct {
+	// MCP 非空时使用固定 MCP 协议处理器，不进行原始 HTTP 转发。
+	MCP MCPFactory
 	// Ref 指定 Guest 可引用的逻辑服务名。
 	Ref string
 	// Origin 指定无路径、查询、用户信息或片段的 HTTPS 源站。

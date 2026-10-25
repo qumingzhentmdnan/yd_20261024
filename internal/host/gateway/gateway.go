@@ -20,6 +20,8 @@ type binding struct {
 	identity ChannelIdentity
 	// services 限制本绑定能引用的服务。
 	services map[string]bool
+	// mcp 保存本绑定独占的 MCP 协议会话。
+	mcp map[string]MCPSession
 }
 
 // Gateway 管理进程内绑定与在途流，不持久化授权。
@@ -80,7 +82,13 @@ func (g *Gateway) Bind(ctx context.Context, identity ChannelIdentity, spec Bindi
 	rand.Read(random[:])
 	id := BindingID("g_" + hex.EncodeToString(random[:]))
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	var retired []MCPSession
+	defer func() {
+		g.mu.Unlock()
+		for _, session := range retired {
+			session.Close()
+		}
+	}()
 	if g.closed {
 		return "", ErrClosed
 	}
@@ -89,18 +97,30 @@ func (g *Gateway) Bind(ctx context.Context, identity ChannelIdentity, spec Bindi
 		if g.bindings[old].identity == identity {
 			return "", ErrConflict
 		}
-		g.revokeLocked(old)
+		retired = g.revokeLocked(old)
 	} else if len(g.bindings) >= g.config.MaxBindings {
 		return "", ErrCapacity
 	}
-	g.bindings[id] = binding{identity: identity, services: services}
+	sessions := make(map[string]MCPSession)
+	for ref := range services {
+		s := g.services[ref]
+		if s.config.MCP != nil {
+			sessions[ref] = s.config.MCP.NewSession(s.client, g.credentials, s.config.CredentialRef)
+		}
+	}
+	g.bindings[id] = binding{identity: identity, services: services, mcp: sessions}
 	g.current[identity.Instance.Ref.ID] = id
 	return id, nil
 }
 
 // revokeLocked 在授权锁内撤销绑定并向在途请求发出取消。
-func (g *Gateway) revokeLocked(id BindingID) {
+func (g *Gateway) revokeLocked(id BindingID) []MCPSession {
+	var retired []MCPSession
 	b := g.bindings[id]
+	for _, session := range b.mcp {
+		session.Revoke()
+		retired = append(retired, session)
+	}
 	delete(g.bindings, id)
 	delete(g.current, b.identity.Instance.Ref.ID)
 	for f := range g.flows {
@@ -108,6 +128,7 @@ func (g *Gateway) revokeLocked(id BindingID) {
 			f.cancel(ErrRevoked)
 		}
 	}
+	return retired
 }
 
 // Revoke 撤销授权并发出取消，未知绑定视为已撤销。
@@ -116,9 +137,13 @@ func (g *Gateway) Revoke(ctx context.Context, id BindingID) error {
 		return err
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	var retired []MCPSession
 	if _, exists := g.bindings[id]; exists {
-		g.revokeLocked(id)
+		retired = g.revokeLocked(id)
+	}
+	g.mu.Unlock()
+	for _, session := range retired {
+		session.Close()
 	}
 	return nil
 }
@@ -127,10 +152,14 @@ func (g *Gateway) Revoke(ctx context.Context, id BindingID) error {
 func (g *Gateway) Close() error {
 	g.mu.Lock()
 	g.closed = true
+	var retired []MCPSession
 	for id := range g.bindings {
-		g.revokeLocked(id)
+		retired = append(retired, g.revokeLocked(id)...)
 	}
 	g.mu.Unlock()
+	for _, session := range retired {
+		session.Close()
+	}
 	for _, s := range g.services {
 		s.client.CloseIdleConnections()
 	}
@@ -166,7 +195,7 @@ func (g *Gateway) admit(ctx context.Context, identity ChannelIdentity, id Bindin
 		return nil, nil, ErrClosed
 	}
 	b, exists := g.bindings[id]
-	if !exists || b.identity != identity || !b.services[request.ServiceRef] || request.Method != http.MethodPost {
+	if !exists || b.identity != identity || !b.services[request.ServiceRef] || request.Method != http.MethodPost && !(g.services[request.ServiceRef].config.MCP != nil && (request.Method == http.MethodDelete || request.Method == http.MethodGet)) {
 		return nil, nil, ErrForbidden
 	}
 	s := g.services[request.ServiceRef]
@@ -189,6 +218,9 @@ func (g *Gateway) forward(f *flow, s *service, request ProxyRequest) (ProxyRespo
 	}
 	if int64(len(data)) > g.config.MaxRequestBytes {
 		return ProxyResponse{}, ErrTooLarge
+	}
+	if s.config.MCP != nil {
+		return g.forwardMCP(f, request, data)
 	}
 	credential, err := g.credentials.Resolve(f.ctx, s.config.CredentialRef)
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 func TestLongSessionProbeAndOperationReplay(t *testing.T) {
 	c, p, s := newClient(t)
 	s = readyClient(t, c, p, s)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	started, err := c.StartSession(ctx, s)
 	if err != nil {

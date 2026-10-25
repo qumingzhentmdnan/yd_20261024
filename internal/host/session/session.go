@@ -40,6 +40,10 @@ type Config struct {
 	Rows protocol.Dimension
 	// Cols 指定PTY初始列数。
 	Cols protocol.Dimension
+	// Review 在进程组停止且变更持久冻结后执行用户审核，nil仍保存待恢复记录。
+	Review func(context.Context, *workspace.Review) error
+	// OnReviewSaved 通知调用方冻结变更集ID，便于退出后恢复审核。
+	OnReviewSaved func(string)
 	// StartupTimeout 限制快照、启动、握手和导入准备的总时长。
 	StartupTimeout time.Duration
 }
@@ -174,5 +178,25 @@ func Run(ctx context.Context, c Config, interact func(context.Context, guest.Cli
 		return fmt.Errorf("启动Agent: %w", err)
 	}
 	stopStartup()
-	return interact(life, client, info)
+	interactionErr := interact(life, client, info)
+	if life.Err() != nil {
+		return interactionErr
+	}
+	// 先清空进程组，确保审核读取期间Agent不再执行写入。
+	stopCtx, stopExport := context.WithTimeout(life, 30*time.Second)
+	defer stopExport()
+	if err := client.StopSession(stopCtx, protocol.StopSessionParams{SessionID: info.SessionID, GraceMs: 1000, ForceAfterTimeout: true}); err != nil {
+		return errors.Join(interactionErr, err)
+	}
+	review, err := c.Workspace.CollectReview(life, baseline.ID, client)
+	if err != nil {
+		return errors.Join(interactionErr, fmt.Errorf("冻结工作区变更: %w", err))
+	}
+	if c.OnReviewSaved != nil {
+		c.OnReviewSaved(review.ID())
+	}
+	if c.Review != nil {
+		return errors.Join(interactionErr, c.Review(life, review))
+	}
+	return interactionErr
 }

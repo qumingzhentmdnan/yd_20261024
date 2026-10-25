@@ -59,6 +59,10 @@ func TestPayloadFixtures(t *testing.T) {
 					target = &Bind{}
 				case "Bound":
 					target = &Bound{}
+				case "ListChangesParams":
+					target = &ListChangesParams{}
+				case "ReadChangeChunkParams":
+					target = &ReadChangeChunkParams{}
 				case "StopSessionParams":
 					target = &StopSessionParams{}
 				case "ResizeTerminalParams":

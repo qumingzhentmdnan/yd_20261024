@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,12 @@ func (b *Bridge) Close() {
 
 // ServeHTTP 有界缓存上传，取得资格后逐块交付响应；异常流关闭HTTP连接。
 func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 原生 MCP 客户端会先探测 OAuth 元数据；Guest 不持有远程认证，明确返回本地未提供。
+	if strings.HasPrefix(r.URL.Path, "/.well-known/") {
+		w.Header().Set("Connection", "close")
+		http.NotFound(w, r)
+		return
+	}
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -129,7 +136,17 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data := upload.Bytes()
-	meta, err := proxywire.Encode(proxywire.RequestMeta{Service: b.service, Method: r.Method, Path: r.URL.RequestURI(), Headers: r.Header})
+	service := b.service
+	route := r.URL.RequestURI()
+	if strings.HasPrefix(r.URL.Path, "/mcp/") {
+		ref := strings.TrimPrefix(r.URL.Path, "/mcp/")
+		if ref == "" || strings.ContainsAny(ref, "/%?\\\r\n") || r.URL.RawQuery != "" {
+			http.Error(w, "invalid MCP service", 400)
+			return
+		}
+		service, route = "mcp:"+ref, "/mcp"
+	}
+	meta, err := proxywire.Encode(proxywire.RequestMeta{Service: service, Method: r.Method, Path: route, Headers: r.Header})
 	if err != nil {
 		http.Error(w, "headers too large", 431)
 		return
