@@ -269,7 +269,6 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case "/api/poll":
 		s.mu.Lock()
 		result := map[string]any{"state": s.state, "output": s.output, "review": s.review}
-		s.output = nil
 		s.mu.Unlock()
 		json.NewEncoder(w).Encode(result)
 	case "/api/input":
