@@ -4,3 +4,4 @@
 .connection-actions{display:flex;gap:6px;align-items:center}.connection-actions button{padding:7px 9px;font-size:10px}
 .safety-hidden{display:none!important}
 .dialog-backdrop[hidden]{display:none!important}
+.directory-dialog{max-width:560px;width:100%}.directory-path{font:11px ui-monospace,monospace;color:#7b8598;background:#f6f7fa;border-radius:6px;padding:9px;margin-bottom:10px}.directory-list{display:grid;grid-template-columns:1fr 1fr;gap:6px;min-height:180px;max-height:300px;overflow:auto}.directory-item{border:1px solid #e6e9f0;background:#fff;border-radius:6px;padding:10px;text-align:left;color:#4d5870;font-size:12px}.directory-item:hover{border-color:#7374e8;background:#f5f5ff}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}

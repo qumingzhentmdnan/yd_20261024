@@ -186,6 +186,21 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 // handle 分派显式浏览器操作，错误响应不包含供应商或密钥原文。
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
+	case "/api/directories":
+		var req struct {
+			// Path 是目录选择器当前目录。
+			Path string `json:"path"`
+		}
+		if decode(w, r, &req) != nil {
+			http.Error(w, "无效请求", 400)
+			return
+		}
+		directories, err := projectselection.Directories(req.Path)
+		if err != nil {
+			http.Error(w, "无法读取目录", 400)
+			return
+		}
+		json.NewEncoder(w).Encode(directories)
 	case "/api/files":
 		var req struct {
 			// Project 是待枚举目录。

@@ -23,8 +23,40 @@ type File struct {
 	Warning string `json:"warning,omitempty"`
 }
 
+// Directory 描述目录选择器中的可进入目录。
+type Directory struct {
+	// Path 是目录的绝对路径。
+	Path string `json:"path"`
+	// Name 是界面显示的目录名。
+	Name string `json:"name"`
+}
+
+// Directories 返回指定目录下的真实子目录，供本机目录选择器使用。
+func Directories(root string) ([]Directory, error) {
+	if root == "" {
+		root = "/home"
+	}
+	root = normalizeWindowsPath(root)
+	if !filepath.IsAbs(root) {
+		return nil, fmt.Errorf("目录路径必须为绝对路径")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Directory, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		result = append(result, Directory{Path: filepath.Join(root, entry.Name()), Name: entry.Name()})
+	}
+	return result, nil
+}
+
 // List 读取 Git 的跟踪与未忽略文件，拒绝符号链接和非普通文件。
 func List(ctx context.Context, root string) ([]File, error) {
+	root = normalizeWindowsPath(root)
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("项目路径必须为绝对路径")
 	}
@@ -113,6 +145,19 @@ func List(ctx context.Context, root string) ([]File, error) {
 		}
 	}
 	return files, nil
+}
+
+// normalizeWindowsPath 将 WSL 中用户常见的 Windows 盘符路径转换为挂载路径。
+func normalizeWindowsPath(root string) string {
+	if len(root) < 3 || root[1] != ':' || (root[2] != '\\' && root[2] != '/') {
+		return root
+	}
+	drive := root[0]
+	if drive >= 'A' && drive <= 'Z' {
+		drive += 'a' - 'A'
+	}
+	path := strings.ReplaceAll(root[2:], "\\", "/")
+	return "/mnt/" + string(drive) + path
 }
 
 // SensitivePath 标记常见凭据路径，不能保证识别全部秘密。
