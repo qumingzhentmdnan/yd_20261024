@@ -178,7 +178,7 @@ func launch(ctx context.Context, c launchConfig, content protocol.Preparation, r
 	if err != nil {
 		return err
 	}
-	config := session.Config{Backend: manager, Driver: driver, Workspace: snapshots, Gateway: modelGateway, VM: vm.VMConfig{ID: string(id), Architecture: vm.AMD64, Machine: vm.MicroVM, Accelerator: c.Accelerator, VCPUs: c.VCPUs, MemoryMiB: c.MemoryMiB, Image: c.Image}, Selection: workspace.ImportSelection{Root: req.Project, Paths: req.Files, Generated: generated}, Content: content, ServiceRefs: refs, Rows: 32, Cols: 100, StartupTimeout: 2 * time.Minute}
+	config := session.Config{Backend: manager, Driver: driver, Workspace: snapshots, Gateway: modelGateway, VM: vm.VMConfig{ID: string(id), Architecture: vm.AMD64, Machine: vm.MicroVM, Accelerator: c.Accelerator, VCPUs: c.VCPUs, MemoryMiB: c.MemoryMiB, Image: c.Image}, Selection: workspace.ImportSelection{Root: req.Project, Paths: req.Files, Generated: generated}, Content: content, ServiceRefs: refs, Rows: 32, Cols: 100, StartupTimeout: 2 * time.Minute, RetainVM: true}
 	config.Review = func(ctx context.Context, r *workspace.Review) error {
 		return review(api.Review{ID: r.ID(), Changes: len(r.Changes()), Diff: r.Diff()}, func(ctx context.Context) error { return r.Apply(ctx, r.ID()) })
 	}

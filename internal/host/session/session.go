@@ -46,6 +46,8 @@ type Config struct {
 	OnReviewSaved func(string)
 	// StartupTimeout 限制快照、启动、握手和导入准备的总时长。
 	StartupTimeout time.Duration
+	// RetainVM 表示会话结束后停止但保留VM资源，等待用户后续明确销毁。
+	RetainVM bool
 }
 
 // Run 启动一次真实会话，交互回调结束后撤销代理并回收自有VM。
@@ -92,6 +94,9 @@ func Run(ctx context.Context, c Config, interact func(context.Context, guest.Cli
 			cleanupErr = c.Backend.Stop(clean, instance, vm.StopOptions{GracePeriod: time.Second, ForceAfterTimeout: true})
 			_, waitErr := c.Backend.Wait(clean, instance)
 			cleanupErr = errors.Join(cleanupErr, waitErr)
+		}
+		if c.RetainVM {
+			return cleanupErr
 		}
 		return errors.Join(cleanupErr, c.Backend.Destroy(clean, ref))
 	}
