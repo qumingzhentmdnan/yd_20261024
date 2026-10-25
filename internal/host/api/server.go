@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"safeagent/internal/host/projectselection"
 	"safeagent/internal/protocol"
@@ -105,6 +106,10 @@ type Server struct {
 	cancel context.CancelFunc
 	// github 是可选的 GitHub OAuth 登录服务。
 	github *githubAuth
+	// request 保存当前活动沙箱的非敏感会话信息，会话结束后保留零值或上次值但不会对外返回。
+	request Request
+	// createdAt 保存当前沙箱创建时间，会话未启动时为零值。
+	createdAt time.Time
 }
 
 // New 为本次本地监听地址创建随机认证上下文。
@@ -257,6 +262,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.done = make(chan struct{})
 		s.running = true
 		s.state = "starting"
+		s.request = Request{Agent: req.Agent, Project: req.Project, Model: req.Model}
+		s.createdAt = time.Now()
 		s.output = nil
 		s.review = nil
 		s.apply = nil
@@ -269,6 +276,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case "/api/poll":
 		s.mu.Lock()
 		result := map[string]any{"state": s.state, "output": s.output, "review": s.review}
+		if s.running {
+			result["sandboxes"] = []map[string]any{{"id": "current", "state": s.state, "agent": s.request.Agent, "project": s.request.Project, "model": s.request.Model, "createdAt": s.createdAt}}
+		} else {
+			result["sandboxes"] = []map[string]any{}
+		}
 		s.mu.Unlock()
 		json.NewEncoder(w).Encode(result)
 	case "/api/input":
