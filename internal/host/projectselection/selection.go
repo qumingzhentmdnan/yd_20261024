@@ -36,7 +36,7 @@ func List(ctx context.Context, root string) ([]File, error) {
 		return nil, fmt.Errorf("项目路径不能包含符号链接")
 	}
 	top, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel")
-	if err != nil || strings.TrimSpace(string(top)) != root {
+	if err != nil || filepath.Clean(strings.TrimSpace(string(top))) != filepath.Clean(root) {
 		return nil, fmt.Errorf("请选择 Git 仓库根目录")
 	}
 	tracked, err := gitOutput(ctx, root, "ls-files", "-z", "--cached")

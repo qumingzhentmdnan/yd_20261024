@@ -51,3 +51,16 @@ func TestList(t *testing.T) {
 		t.Fatal("included ignored file")
 	}
 }
+
+// TestListAcceptsTrailingSlash 验证用户输入仓库路径时允许结尾分隔符。
+func TestListAcceptsTrailingSlash(t *testing.T) {
+	root := t.TempDir()
+	git(t, root, "init", "-q")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("readme"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "README.md")
+	if _, err := List(context.Background(), root+string(os.PathSeparator)); err != nil {
+		t.Fatalf("带结尾分隔符的仓库路径应可读取: %v", err)
+	}
+}
