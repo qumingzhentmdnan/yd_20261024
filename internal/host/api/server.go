@@ -153,9 +153,18 @@ func (s *Server) Handler(page []byte, assets map[string][]byte) http.Handler {
 			http.Error(w, "拒绝跨源请求", 403)
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
+		authorized := subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) == 1
+		if !authorized {
+			if cookie, err := r.Cookie("safeagent_local_session"); err == nil {
+				authorized = subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(s.token)) == 1
+			}
+		}
+		if !authorized {
 			http.Error(w, "需要本地会话认证", 401)
 			return
+		}
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) == 1 && !strings.HasPrefix(r.URL.Path, "/api/auth/") {
+			http.SetCookie(w, &http.Cookie{Name: "safeagent_local_session", Value: s.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/auth/") {
 			s.githubAuthHandler(w, r)
